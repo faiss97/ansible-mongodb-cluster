@@ -5,7 +5,7 @@
 
 galaxy_info:
   role_name: ansible_mongodb_cluster
-  author: DevOps Team
+  author: DevOps Faiss97
   description: |
     Production-ready Ansible role for deploying and managing MongoDB clusters.
     Supports standalone, replica set, and sharded cluster deployments with

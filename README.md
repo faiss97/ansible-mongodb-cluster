@@ -1,6 +1,6 @@
 # Ansible MongoDB Cluster
 
-[![Ansible Role](https://img.shields.io/badge/role-ansible--mongodb--cluster-blue.svg)](https://github.com/your-org/ansible-mongodb-cluster)
+[![Ansible Role](https://img.shields.io/badge/role-ansible--mongodb--cluster-blue.svg)](https://github.com/faiss97/ansible-mongodb-cluster)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Ansible Version](https://img.shields.io/badge/ansible-%3E%3D2.12-red.svg)](https://www.ansible.com/)
 
@@ -84,7 +84,7 @@ ansible-galaxy install -r requirements.yml
 ### From GitHub
 
 ```bash
-git clone https://github.com/your-org/ansible-mongodb-cluster.git
+git clone https://github.com/faiss97/ansible-mongodb-cluster.git
 cd ansible-mongodb-cluster
 ```
 
@@ -93,7 +93,7 @@ cd ansible-mongodb-cluster
 ```bash
 # In your requirements.yml
 roles:
-  - src: https://github.com/your-org/ansible-mongodb-cluster.git
+  - src: https://github.com/faiss97/ansible-mongodb-cluster.git
     name: ansible-mongodb-cluster
     version: main
 ```
@@ -560,8 +560,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Author
 
-DevOps Team
+DevOps faiss97
 
 ## Acknowledgments
-
-Inspired by [mrlesmithjr/ansible-mariadb-galera-cluster](https://github.com/mrlesmithjr/ansible-mariadb-galera-cluster).
