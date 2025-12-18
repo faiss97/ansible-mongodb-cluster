@@ -1,0 +1,208 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Validation Tasks
+# =============================================================================
+# Validates all configuration before proceeding with installation.
+# =============================================================================
+
+- name: Validate | Check Ansible version
+  ansible.builtin.assert:
+    that:
+      - ansible_version.full is version('2.12', '>=')
+    fail_msg: "This role requires Ansible 2.12 or later. Found: {{ ansible_version.full }}"
+    success_msg: "Ansible version {{ ansible_version.full }} is supported"
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check deployment mode
+  ansible.builtin.assert:
+    that:
+      - mongodb_deployment_mode in _mongodb_valid_deployment_modes
+    fail_msg: "Invalid deployment mode '{{ mongodb_deployment_mode }}'. Valid modes: {{ _mongodb_valid_deployment_modes | join(', ') }}"
+    success_msg: "Deployment mode '{{ mongodb_deployment_mode }}' is valid"
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check MongoDB version
+  ansible.builtin.assert:
+    that:
+      - mongodb_version in _mongodb_supported_versions
+    fail_msg: "MongoDB version '{{ mongodb_version }}' is not supported. Supported versions: {{ _mongodb_supported_versions | join(', ') }}"
+    success_msg: "MongoDB version '{{ mongodb_version }}' is supported"
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check admin password is set when auth is enabled
+  ansible.builtin.assert:
+    that:
+      - mongodb_admin_password | length > 0
+    fail_msg: "{{ _mongodb_error_messages.auth_required }}"
+    success_msg: "Admin password is configured"
+  when: mongodb_security_auth_enabled
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check cluster admin password is set for replica set
+  ansible.builtin.assert:
+    that:
+      - mongodb_cluster_admin_password | length > 0
+    fail_msg: "Cluster admin password must be set for replica set deployment"
+    success_msg: "Cluster admin password is configured"
+  when:
+    - mongodb_security_auth_enabled
+    - mongodb_deployment_mode in ['replicaset', 'sharded']
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check keyfile content or path is set for replica set
+  ansible.builtin.assert:
+    that:
+      - mongodb_keyfile_content | length > 0 or mongodb_keyfile_path | length > 0
+    fail_msg: "{{ _mongodb_error_messages.keyfile_required }}"
+    success_msg: "Keyfile is configured"
+  when:
+    - mongodb_security_auth_enabled
+    - mongodb_deployment_mode in ['replicaset', 'sharded']
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check replica set members are defined
+  ansible.builtin.assert:
+    that:
+      - mongodb_replicaset_members | length >= 1 or groups[mongodb_replicaset_group | default('mongodb')] | default([]) | length >= 1
+    fail_msg: "{{ _mongodb_error_messages.members_required }}"
+    success_msg: "Replica set members are defined"
+  when: mongodb_deployment_mode == 'replicaset'
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check replica set has odd number of voting members
+  ansible.builtin.debug:
+    msg: "WARNING: It is recommended to have an odd number of voting members in a replica set for proper election"
+  when:
+    - mongodb_deployment_mode == 'replicaset'
+    - mongodb_replicaset_members | length > 0
+    - (mongodb_replicaset_members | selectattr('votes', 'defined') | selectattr('votes', 'equalto', 1) | list | length) % 2 == 0
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check TLS certificate files are specified when TLS is enabled
+  ansible.builtin.assert:
+    that:
+      - mongodb_tls_certificate_file | length > 0
+      - mongodb_tls_certificate_key_file | length > 0
+      - mongodb_tls_ca_file | length > 0
+    fail_msg: "{{ _mongodb_error_messages.tls_files_required }}"
+    success_msg: "TLS certificate files are configured"
+  when: mongodb_tls_enabled
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check storage engine is valid
+  ansible.builtin.assert:
+    that:
+      - mongodb_storage_engine in _mongodb_valid_storage_engines
+    fail_msg: "Invalid storage engine '{{ mongodb_storage_engine }}'. Valid engines: {{ _mongodb_valid_storage_engines | join(', ') }}"
+    success_msg: "Storage engine '{{ mongodb_storage_engine }}' is valid"
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check profiling mode is valid
+  ansible.builtin.assert:
+    that:
+      - mongodb_profiling_mode in _mongodb_valid_profiling_modes
+    fail_msg: "Invalid profiling mode '{{ mongodb_profiling_mode }}'. Valid modes: {{ _mongodb_valid_profiling_modes | join(', ') }}"
+    success_msg: "Profiling mode '{{ mongodb_profiling_mode }}' is valid"
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check TLS mode is valid
+  ansible.builtin.assert:
+    that:
+      - mongodb_tls_mode in _mongodb_valid_tls_modes
+    fail_msg: "Invalid TLS mode '{{ mongodb_tls_mode }}'. Valid modes: {{ _mongodb_valid_tls_modes | join(', ') }}"
+    success_msg: "TLS mode '{{ mongodb_tls_mode }}' is valid"
+  when: mongodb_tls_enabled
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check log destination is valid
+  ansible.builtin.assert:
+    that:
+      - mongodb_log_destination in _mongodb_valid_log_destinations
+    fail_msg: "Invalid log destination '{{ mongodb_log_destination }}'. Valid destinations: {{ _mongodb_valid_log_destinations | join(', ') }}"
+    success_msg: "Log destination '{{ mongodb_log_destination }}' is valid"
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check config servers are defined for sharded cluster
+  ansible.builtin.assert:
+    that:
+      - mongodb_config_servers | length >= 1
+    fail_msg: "Config servers must be defined for sharded cluster deployment"
+    success_msg: "Config servers are defined"
+  when:
+    - mongodb_deployment_mode == 'sharded'
+    - mongodb_mongos_router
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check port numbers are valid
+  ansible.builtin.assert:
+    that:
+      - mongodb_port | int > 0
+      - mongodb_port | int < 65536
+    fail_msg: "Invalid port number {{ mongodb_port }}"
+    success_msg: "Port {{ mongodb_port }} is valid"
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check data directory is absolute path
+  ansible.builtin.assert:
+    that:
+      - mongodb_data_directory is match('^/')
+    fail_msg: "Data directory must be an absolute path: {{ mongodb_data_directory }}"
+    success_msg: "Data directory path is valid"
+  tags:
+    - mongodb-validate
+
+- name: Validate | Check password strength for admin user
+  ansible.builtin.debug:
+    msg: "WARNING: Admin password is less than 16 characters. Consider using a stronger password."
+  when:
+    - mongodb_security_auth_enabled
+    - mongodb_admin_password | length < 16
+  tags:
+    - mongodb-validate
+
+- name: Validate | Ensure backup user password is set when backup is enabled
+  ansible.builtin.assert:
+    that:
+      - mongodb_backup_password | length > 0
+    fail_msg: "Backup user password must be set when backup is enabled"
+    success_msg: "Backup user password is configured"
+  when:
+    - mongodb_backup_enabled
+    - mongodb_create_backup_user
+    - mongodb_security_auth_enabled
+  tags:
+    - mongodb-validate
+
+- name: Validate | Ensure monitoring user password is set when monitoring is enabled
+  ansible.builtin.assert:
+    that:
+      - mongodb_monitoring_password | length > 0
+    fail_msg: "Monitoring user password must be set when exporter is enabled"
+    success_msg: "Monitoring user password is configured"
+  when:
+    - mongodb_exporter_enabled
+    - mongodb_create_monitoring_user
+    - mongodb_security_auth_enabled
+  tags:
+    - mongodb-validate
+
+- name: Validate | Display validation summary
+  ansible.builtin.debug:
+    msg: "All validations passed successfully"
+  tags:
+    - mongodb-validate

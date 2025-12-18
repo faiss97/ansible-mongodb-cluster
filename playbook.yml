@@ -1,0 +1,14 @@
+---
+# =============================================================================
+# MongoDB Cluster Deployment Playbook
+# =============================================================================
+# Main playbook for deploying MongoDB clusters using the ansible-mongodb-cluster role.
+# =============================================================================
+
+- name: Deploy MongoDB Cluster
+  hosts: mongodb
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: ansible-mongodb-cluster

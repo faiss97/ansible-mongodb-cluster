@@ -1,0 +1,46 @@
+---
+# =============================================================================
+# Molecule Verify Playbook
+# =============================================================================
+
+- name: Verify MongoDB Deployment
+  hosts: mongodb
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Verify MongoDB service is running
+      ansible.builtin.systemd:
+        name: mongod
+      register: mongod_service
+      failed_when: mongod_service.status.ActiveState != 'active'
+
+    - name: Verify MongoDB is listening on port
+      ansible.builtin.wait_for:
+        port: 27017
+        host: localhost
+        timeout: 30
+
+    - name: Verify MongoDB ping
+      ansible.builtin.command: >
+        mongosh --host localhost --port 27017
+        --eval "db.adminCommand('ping')"
+        --quiet
+      register: mongodb_ping
+      changed_when: false
+      failed_when: mongodb_ping.rc != 0
+
+    - name: Verify replica set status
+      ansible.builtin.command: >
+        mongosh --host localhost --port 27017
+        --eval "rs.status().ok"
+        --quiet
+      register: rs_status
+      changed_when: false
+      run_once: true
+      failed_when: rs_status.stdout != '1'
+
+    - name: Display verification success
+      ansible.builtin.debug:
+        msg: "MongoDB cluster verification passed successfully!"
+      run_once: true

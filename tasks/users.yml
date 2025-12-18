@@ -1,0 +1,401 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - User Management Tasks
+# =============================================================================
+# Creates and manages MongoDB users including admin, cluster admin, and
+# application users.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Pre-flight Checks
+# -----------------------------------------------------------------------------
+
+- name: Users | Check if admin user already exists
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    --eval "db.getSiblingDB('admin').getUser('{{ mongodb_admin_user }}')"
+    --quiet
+  register: _admin_user_check
+  changed_when: false
+  failed_when: false
+  run_once: true
+  tags:
+    - mongodb-users
+
+- name: Users | Set admin user exists flag
+  ansible.builtin.set_fact:
+    _mongodb_admin_exists: "{{ _admin_user_check.stdout is not none and 'null' not in _admin_user_check.stdout }}"
+  run_once: true
+  tags:
+    - mongodb-users
+
+- name: Users | Display admin user status
+  ansible.builtin.debug:
+    msg: "Admin user '{{ mongodb_admin_user }}' {{ 'already exists' if _mongodb_admin_exists else 'does not exist' }}"
+  run_once: true
+  tags:
+    - mongodb-users
+
+# -----------------------------------------------------------------------------
+# Determine Primary for User Operations
+# -----------------------------------------------------------------------------
+
+- name: Users | Get current primary for user operations
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    --eval "rs.status().members.find(m => m.stateStr === 'PRIMARY')?.name || 'localhost:{{ mongodb_port }}'"
+    --quiet
+  register: _users_primary_check
+  changed_when: false
+  failed_when: false
+  run_once: true
+  when: mongodb_deployment_mode == 'replicaset'
+  tags:
+    - mongodb-users
+
+- name: Users | Set primary host for user operations
+  ansible.builtin.set_fact:
+    _mongodb_users_primary: >-
+      {{ _users_primary_check.stdout.split(':')[0] | default('localhost')
+         if mongodb_deployment_mode == 'replicaset'
+         else 'localhost' }}
+  run_once: true
+  tags:
+    - mongodb-users
+
+# -----------------------------------------------------------------------------
+# Create Admin User (First User - No Auth Required)
+# -----------------------------------------------------------------------------
+
+- name: Users | Create admin user (first user creation)
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    --eval '
+      db.getSiblingDB("admin").createUser({
+        user: "{{ mongodb_admin_user }}",
+        pwd: "{{ mongodb_admin_password }}",
+        roles: [
+          {% for role in mongodb_admin_roles %}
+          { role: "{{ role.role }}", db: "{{ role.db }}" }{% if not loop.last %},{% endif %}
+          {% endfor %}
+        ]
+      })
+    '
+    --quiet
+  register: _admin_user_create
+  when:
+    - not _mongodb_admin_exists
+    - mongodb_security_auth_enabled
+  run_once: true
+  delegate_to: "{{ _mongodb_users_primary | default(inventory_hostname) }}"
+  no_log: true
+  tags:
+    - mongodb-users
+
+- name: Users | Display admin user creation result
+  ansible.builtin.debug:
+    msg: "Admin user '{{ mongodb_admin_user }}' created successfully"
+  when:
+    - _admin_user_create is defined
+    - _admin_user_create.changed
+  run_once: true
+  tags:
+    - mongodb-users
+
+# -----------------------------------------------------------------------------
+# Create Cluster Admin User
+# -----------------------------------------------------------------------------
+
+- name: Users | Check if cluster admin user exists
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
+    --authenticationDatabase admin
+    --eval "db.getSiblingDB('admin').getUser('{{ mongodb_cluster_admin_user }}')"
+    --quiet
+  register: _cluster_admin_check
+  changed_when: false
+  failed_when: false
+  run_once: true
+  when:
+    - mongodb_security_auth_enabled
+    - mongodb_deployment_mode in ['replicaset', 'sharded']
+  no_log: true
+  tags:
+    - mongodb-users
+
+- name: Users | Create cluster admin user
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
+    --authenticationDatabase admin
+    --eval '
+      db.getSiblingDB("admin").createUser({
+        user: "{{ mongodb_cluster_admin_user }}",
+        pwd: "{{ mongodb_cluster_admin_password }}",
+        roles: [
+          {% for role in mongodb_cluster_admin_roles %}
+          { role: "{{ role.role }}", db: "{{ role.db }}" }{% if not loop.last %},{% endif %}
+          {% endfor %}
+        ]
+      })
+    '
+    --quiet
+  register: _cluster_admin_create
+  when:
+    - mongodb_security_auth_enabled
+    - mongodb_deployment_mode in ['replicaset', 'sharded']
+    - _cluster_admin_check.stdout is defined
+    - "'null' in _cluster_admin_check.stdout or _cluster_admin_check.stdout == ''"
+  run_once: true
+  delegate_to: "{{ _mongodb_users_primary | default(inventory_hostname) }}"
+  no_log: true
+  tags:
+    - mongodb-users
+
+# -----------------------------------------------------------------------------
+# Create Backup User
+# -----------------------------------------------------------------------------
+
+- name: Users | Check if backup user exists
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
+    --authenticationDatabase admin
+    --eval "db.getSiblingDB('admin').getUser('{{ mongodb_backup_user }}')"
+    --quiet
+  register: _backup_user_check
+  changed_when: false
+  failed_when: false
+  run_once: true
+  when:
+    - mongodb_security_auth_enabled
+    - mongodb_create_backup_user
+    - mongodb_backup_password | length > 0
+  no_log: true
+  tags:
+    - mongodb-users
+
+- name: Users | Create backup user
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
+    --authenticationDatabase admin
+    --eval '
+      db.getSiblingDB("admin").createUser({
+        user: "{{ mongodb_backup_user }}",
+        pwd: "{{ mongodb_backup_password }}",
+        roles: [
+          {% for role in mongodb_backup_roles %}
+          { role: "{{ role.role }}", db: "{{ role.db }}" }{% if not loop.last %},{% endif %}
+          {% endfor %}
+        ]
+      })
+    '
+    --quiet
+  when:
+    - mongodb_security_auth_enabled
+    - mongodb_create_backup_user
+    - mongodb_backup_password | length > 0
+    - _backup_user_check.stdout is defined
+    - "'null' in _backup_user_check.stdout or _backup_user_check.stdout == ''"
+  run_once: true
+  delegate_to: "{{ _mongodb_users_primary | default(inventory_hostname) }}"
+  no_log: true
+  tags:
+    - mongodb-users
+
+# -----------------------------------------------------------------------------
+# Create Monitoring User
+# -----------------------------------------------------------------------------
+
+- name: Users | Check if monitoring user exists
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
+    --authenticationDatabase admin
+    --eval "db.getSiblingDB('admin').getUser('{{ mongodb_monitoring_user }}')"
+    --quiet
+  register: _monitoring_user_check
+  changed_when: false
+  failed_when: false
+  run_once: true
+  when:
+    - mongodb_security_auth_enabled
+    - mongodb_create_monitoring_user
+    - mongodb_monitoring_password | length > 0
+  no_log: true
+  tags:
+    - mongodb-users
+
+- name: Users | Create monitoring user
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
+    --authenticationDatabase admin
+    --eval '
+      db.getSiblingDB("admin").createUser({
+        user: "{{ mongodb_monitoring_user }}",
+        pwd: "{{ mongodb_monitoring_password }}",
+        roles: [
+          {% for role in mongodb_monitoring_roles %}
+          { role: "{{ role.role }}", db: "{{ role.db }}" }{% if not loop.last %},{% endif %}
+          {% endfor %}
+        ]
+      })
+    '
+    --quiet
+  when:
+    - mongodb_security_auth_enabled
+    - mongodb_create_monitoring_user
+    - mongodb_monitoring_password | length > 0
+    - _monitoring_user_check.stdout is defined
+    - "'null' in _monitoring_user_check.stdout or _monitoring_user_check.stdout == ''"
+  run_once: true
+  delegate_to: "{{ _mongodb_users_primary | default(inventory_hostname) }}"
+  no_log: true
+  tags:
+    - mongodb-users
+
+# -----------------------------------------------------------------------------
+# Create Custom Roles
+# -----------------------------------------------------------------------------
+
+- name: Users | Create custom roles
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
+    --authenticationDatabase admin
+    --eval '
+      db.getSiblingDB("{{ item.database }}").createRole({
+        role: "{{ item.name }}",
+        privileges: {{ item.privileges | to_json }},
+        roles: {{ item.roles | default([]) | to_json }}
+      })
+    '
+    --quiet
+  loop: "{{ mongodb_custom_roles }}"
+  when:
+    - mongodb_security_auth_enabled
+    - mongodb_custom_roles | length > 0
+  run_once: true
+  delegate_to: "{{ _mongodb_users_primary | default(inventory_hostname) }}"
+  failed_when: false
+  changed_when: true
+  no_log: true
+  tags:
+    - mongodb-users
+
+# -----------------------------------------------------------------------------
+# Create Application Users
+# -----------------------------------------------------------------------------
+
+- name: Users | Create application users
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
+    --authenticationDatabase admin
+    --eval '
+      var user = db.getSiblingDB("{{ item.database }}").getUser("{{ item.name }}");
+      if (user === null) {
+        db.getSiblingDB("{{ item.database }}").createUser({
+          user: "{{ item.name }}",
+          pwd: "{{ item.password }}",
+          roles: {{ item.roles | to_json }}
+        });
+        print("User created");
+      } else {
+        print("User exists");
+      }
+    '
+    --quiet
+  loop: "{{ mongodb_users }}"
+  when:
+    - mongodb_security_auth_enabled
+    - mongodb_users | length > 0
+  run_once: true
+  delegate_to: "{{ _mongodb_users_primary | default(inventory_hostname) }}"
+  register: _app_user_create
+  changed_when: "'User created' in _app_user_create.stdout"
+  no_log: true
+  tags:
+    - mongodb-users
+
+# -----------------------------------------------------------------------------
+# Verify User Authentication
+# -----------------------------------------------------------------------------
+
+- name: Users | Verify admin authentication
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
+    --authenticationDatabase admin
+    --eval "db.adminCommand('ping')"
+    --quiet
+  register: _admin_auth_verify
+  changed_when: false
+  when: mongodb_security_auth_enabled
+  run_once: true
+  no_log: true
+  tags:
+    - mongodb-users
+
+- name: Users | Display authentication verification
+  ansible.builtin.debug:
+    msg: "Admin authentication verified successfully"
+  when:
+    - mongodb_security_auth_enabled
+    - _admin_auth_verify.rc == 0
+  run_once: true
+  tags:
+    - mongodb-users
+
+# -----------------------------------------------------------------------------
+# List All Users (Debug)
+# -----------------------------------------------------------------------------
+
+- name: Users | List all users
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
+    --authenticationDatabase admin
+    --eval "db.getSiblingDB('admin').getUsers()"
+    --quiet
+  register: _users_list
+  changed_when: false
+  when:
+    - mongodb_security_auth_enabled
+    - mongodb_debug_mode
+  run_once: true
+  no_log: true
+  tags:
+    - mongodb-users
+
+- name: Users | Display users list
+  ansible.builtin.debug:
+    msg: "{{ _users_list.stdout }}"
+  when:
+    - mongodb_debug_mode
+    - _users_list is defined
+    - _users_list.stdout is defined
+  run_once: true
+  tags:
+    - mongodb-users
+
+# -----------------------------------------------------------------------------
+# User Management Summary
+# -----------------------------------------------------------------------------
+
+- name: Users | Display user management summary
+  ansible.builtin.debug:
+    msg: |
+      User Management Summary:
+      - Admin User: {{ mongodb_admin_user }}
+      - Cluster Admin: {{ mongodb_cluster_admin_user if mongodb_deployment_mode in ['replicaset', 'sharded'] else 'N/A' }}
+      - Backup User: {{ mongodb_backup_user if mongodb_create_backup_user else 'Not created' }}
+      - Monitoring User: {{ mongodb_monitoring_user if mongodb_create_monitoring_user else 'Not created' }}
+      - Application Users: {{ mongodb_users | length }}
+      - Custom Roles: {{ mongodb_custom_roles | length }}
+  run_once: true
+  tags:
+    - mongodb-users

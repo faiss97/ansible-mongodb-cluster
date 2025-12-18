@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# Host Variables - mongo1.example.com
+# =============================================================================
+# Host-specific configuration for the primary MongoDB node.
+# =============================================================================
+
+# This node has higher priority to be elected as primary
+mongodb_node_priority: 2
+
+# Node-specific network binding
+mongodb_bind_ip: "127.0.0.1,192.168.1.11"
+
+# Custom WiredTiger cache for this node (if it has more RAM)
+# mongodb_wiredtiger_cache_size_gb: 4
+
+# This node builds indexes
+mongodb_node_build_indexes: true
+
+# Not a hidden node
+mongodb_node_hidden: false
+
+# No secondary delay
+mongodb_node_slave_delay: 0

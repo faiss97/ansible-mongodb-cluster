@@ -1,0 +1,72 @@
+---
+# =============================================================================
+# MongoDB Vault Variables - ENCRYPTED SECRETS
+# =============================================================================
+# This file should be encrypted with ansible-vault!
+#
+# To encrypt: ansible-vault encrypt vault.yml
+# To edit:    ansible-vault edit vault.yml
+# To view:    ansible-vault view vault.yml
+#
+# NEVER commit this file unencrypted to version control!
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# MongoDB Admin Passwords
+# -----------------------------------------------------------------------------
+
+# Root admin password (minimum 16 characters recommended)
+mongodb_admin_password: "SuperSecureAdminPassword123!"
+
+# Cluster admin password
+mongodb_cluster_admin_password: "SuperSecureClusterPassword123!"
+
+# Backup user password
+mongodb_backup_password: "SuperSecureBackupPassword123!"
+
+# Monitoring user password
+mongodb_monitoring_password: "SuperSecureMonitorPassword123!"
+
+# -----------------------------------------------------------------------------
+# Application User Passwords
+# -----------------------------------------------------------------------------
+
+vault_mongodb_appuser_password: "AppUserSecurePassword123!"
+vault_mongodb_readonly_password: "ReadOnlySecurePassword123!"
+
+# -----------------------------------------------------------------------------
+# Keyfile Content (for replica set authentication)
+# -----------------------------------------------------------------------------
+
+# Generate with: openssl rand -base64 756
+mongodb_keyfile_content: |
+  YOUR_BASE64_ENCODED_KEYFILE_CONTENT_HERE
+  MUST_BE_AT_LEAST_6_CHARACTERS
+  GENERATE_WITH_OPENSSL_RAND_BASE64_756
+
+# -----------------------------------------------------------------------------
+# TLS/SSL Certificates (if using TLS)
+# -----------------------------------------------------------------------------
+
+# mongodb_tls_certificate_content: |
+#   -----BEGIN CERTIFICATE-----
+#   YOUR_CERTIFICATE_HERE
+#   -----END CERTIFICATE-----
+
+# mongodb_tls_key_content: |
+#   -----BEGIN PRIVATE KEY-----
+#   YOUR_PRIVATE_KEY_HERE
+#   -----END PRIVATE KEY-----
+
+# -----------------------------------------------------------------------------
+# Cloud Manager / Ops Manager API Key
+# -----------------------------------------------------------------------------
+
+# mongodb_cloud_manager_api_key: "your-api-key-here"
+
+# -----------------------------------------------------------------------------
+# S3 Credentials for Backup (if using S3)
+# -----------------------------------------------------------------------------
+
+# aws_access_key_id: "YOUR_AWS_ACCESS_KEY"
+# aws_secret_access_key: "YOUR_AWS_SECRET_KEY"

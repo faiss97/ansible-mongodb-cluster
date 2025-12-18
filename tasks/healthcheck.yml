@@ -1,0 +1,274 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Health Check Tasks
+# =============================================================================
+# Performs health checks on MongoDB deployment.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Basic Connectivity Check
+# -----------------------------------------------------------------------------
+
+- name: HealthCheck | Verify MongoDB is listening
+  ansible.builtin.wait_for:
+    port: "{{ mongodb_port }}"
+    host: localhost
+    timeout: 30
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Test MongoDB ping
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval "db.adminCommand('ping')"
+    --quiet
+  register: _healthcheck_ping
+  changed_when: false
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Display ping result
+  ansible.builtin.debug:
+    msg: "MongoDB ping: {{ 'SUCCESS' if _healthcheck_ping.rc == 0 else 'FAILED' }}"
+  tags:
+    - mongodb-healthcheck
+
+# -----------------------------------------------------------------------------
+# Server Status Check
+# -----------------------------------------------------------------------------
+
+- name: HealthCheck | Get server status
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval "JSON.stringify(db.serverStatus(), null, 2)"
+    --quiet
+  register: _server_status
+  changed_when: false
+  failed_when: false
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Parse server status
+  ansible.builtin.set_fact:
+    _mongodb_server_status: "{{ _server_status.stdout | from_json }}"
+  when: _server_status.rc == 0
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Display server status summary
+  ansible.builtin.debug:
+    msg: |
+      MongoDB Server Status:
+      - Version: {{ _mongodb_server_status.version | default('Unknown') }}
+      - Uptime: {{ (_mongodb_server_status.uptime | default(0) / 3600) | round(2) }} hours
+      - Connections: {{ _mongodb_server_status.connections.current | default(0) }} / {{ _mongodb_server_status.connections.available | default(0) }}
+      - Storage Engine: {{ _mongodb_server_status.storageEngine.name | default('Unknown') }}
+  when: _mongodb_server_status is defined
+  tags:
+    - mongodb-healthcheck
+
+# -----------------------------------------------------------------------------
+# Replica Set Health Check
+# -----------------------------------------------------------------------------
+
+- name: HealthCheck | Check replica set status
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval "JSON.stringify(rs.status())"
+    --quiet
+  register: _rs_status
+  changed_when: false
+  failed_when: false
+  when: mongodb_deployment_mode == 'replicaset'
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Parse replica set status
+  ansible.builtin.set_fact:
+    _mongodb_rs_status: "{{ _rs_status.stdout | from_json }}"
+  when:
+    - mongodb_deployment_mode == 'replicaset'
+    - _rs_status.rc == 0
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Display replica set status
+  ansible.builtin.debug:
+    msg: |
+      Replica Set Status:
+      - Name: {{ _mongodb_rs_status.set | default('Unknown') }}
+      - Members: {{ _mongodb_rs_status.members | length | default(0) }}
+      - Primary: {{ _mongodb_rs_status.members | selectattr('stateStr', 'equalto', 'PRIMARY') | map(attribute='name') | first | default('None') }}
+      - Healthy Members: {{ _mongodb_rs_status.members | selectattr('health', 'equalto', 1) | list | length | default(0) }}
+  when:
+    - mongodb_deployment_mode == 'replicaset'
+    - _mongodb_rs_status is defined
+  run_once: true
+  tags:
+    - mongodb-healthcheck
+
+# -----------------------------------------------------------------------------
+# Replication Lag Check
+# -----------------------------------------------------------------------------
+
+- name: HealthCheck | Check replication lag
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval '
+      var status = rs.status();
+      var primary = status.members.find(m => m.stateStr === "PRIMARY");
+      var secondaries = status.members.filter(m => m.stateStr === "SECONDARY");
+      var maxLag = 0;
+      secondaries.forEach(s => {
+        var lag = (primary.optimeDate - s.optimeDate) / 1000;
+        if (lag > maxLag) maxLag = lag;
+      });
+      print(maxLag);
+    '
+    --quiet
+  register: _replication_lag
+  changed_when: false
+  failed_when: false
+  when: mongodb_deployment_mode == 'replicaset'
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Display replication lag
+  ansible.builtin.debug:
+    msg: "Maximum replication lag: {{ _replication_lag.stdout | default('0') }} seconds"
+  when:
+    - mongodb_deployment_mode == 'replicaset'
+    - _replication_lag.rc == 0
+  run_once: true
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Alert on high replication lag
+  ansible.builtin.debug:
+    msg: "WARNING: Replication lag ({{ _replication_lag.stdout }}s) exceeds threshold ({{ mongodb_replication_lag_threshold }}s)"
+  when:
+    - mongodb_deployment_mode == 'replicaset'
+    - _replication_lag.rc == 0
+    - (_replication_lag.stdout | int) > mongodb_replication_lag_threshold
+  run_once: true
+  tags:
+    - mongodb-healthcheck
+
+# -----------------------------------------------------------------------------
+# Storage Check
+# -----------------------------------------------------------------------------
+
+- name: HealthCheck | Check database storage statistics
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval "JSON.stringify(db.adminCommand({ listDatabases: 1, nameOnly: false }))"
+    --quiet
+  register: _db_stats
+  changed_when: false
+  failed_when: false
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Parse database statistics
+  ansible.builtin.set_fact:
+    _mongodb_db_stats: "{{ _db_stats.stdout | from_json }}"
+  when: _db_stats.rc == 0
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Display storage summary
+  ansible.builtin.debug:
+    msg: |
+      Storage Summary:
+      - Total Databases: {{ _mongodb_db_stats.databases | length | default(0) }}
+      - Total Size: {{ ((_mongodb_db_stats.totalSize | default(0)) / 1024 / 1024 / 1024) | round(2) }} GB
+  when: _mongodb_db_stats is defined
+  tags:
+    - mongodb-healthcheck
+
+# -----------------------------------------------------------------------------
+# Disk Space Check
+# -----------------------------------------------------------------------------
+
+- name: HealthCheck | Check disk space for data directory
+  ansible.builtin.shell: |
+    df -h {{ mongodb_data_directory }} | tail -1 | awk '{print $5}' | sed 's/%//'
+  register: _disk_usage
+  changed_when: false
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Alert on low disk space
+  ansible.builtin.debug:
+    msg: "WARNING: Disk usage at {{ _disk_usage.stdout }}% for {{ mongodb_data_directory }}"
+  when: (_disk_usage.stdout | int) > 80
+  tags:
+    - mongodb-healthcheck
+
+# -----------------------------------------------------------------------------
+# Connection Test
+# -----------------------------------------------------------------------------
+
+- name: HealthCheck | Test write operation
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval '
+      db.getSiblingDB("admin").healthcheck.insertOne({
+        timestamp: new Date(),
+        node: "{{ inventory_hostname }}"
+      });
+      db.getSiblingDB("admin").healthcheck.deleteMany({
+        timestamp: { $lt: new Date(Date.now() - 3600000) }
+      });
+      print("OK");
+    '
+    --quiet
+  register: _write_test
+  changed_when: false
+  failed_when: false
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Display write test result
+  ansible.builtin.debug:
+    msg: "Write test: {{ 'SUCCESS' if _write_test.rc == 0 and 'OK' in _write_test.stdout else 'FAILED' }}"
+  tags:
+    - mongodb-healthcheck
+
+# -----------------------------------------------------------------------------
+# Final Health Summary
+# -----------------------------------------------------------------------------
+
+- name: HealthCheck | Compile health check results
+  ansible.builtin.set_fact:
+    _mongodb_health_summary:
+      ping: "{{ 'OK' if _healthcheck_ping.rc == 0 else 'FAILED' }}"
+      server_status: "{{ 'OK' if _server_status.rc == 0 else 'FAILED' }}"
+      replicaset: "{{ 'OK' if _rs_status.rc | default(0) == 0 else 'FAILED' if mongodb_deployment_mode == 'replicaset' else 'N/A' }}"
+      replication_lag: "{{ _replication_lag.stdout | default('0') }}s"
+      disk_usage: "{{ _disk_usage.stdout }}%"
+      write_test: "{{ 'OK' if _write_test.rc == 0 else 'FAILED' }}"
+  tags:
+    - mongodb-healthcheck
+
+- name: HealthCheck | Display health check summary
+  ansible.builtin.debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+      MongoDB Health Check Summary - {{ inventory_hostname }}
+      ═══════════════════════════════════════════════════════════════════════
+      Ping:             {{ _mongodb_health_summary.ping }}
+      Server Status:    {{ _mongodb_health_summary.server_status }}
+      Replica Set:      {{ _mongodb_health_summary.replicaset }}
+      Replication Lag:  {{ _mongodb_health_summary.replication_lag }}
+      Disk Usage:       {{ _mongodb_health_summary.disk_usage }}
+      Write Test:       {{ _mongodb_health_summary.write_test }}
+      ═══════════════════════════════════════════════════════════════════════
+  tags:
+    - mongodb-healthcheck

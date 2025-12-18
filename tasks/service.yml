@@ -1,0 +1,195 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Service Management Tasks
+# =============================================================================
+# Manages MongoDB service lifecycle and ensures proper startup.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Service Prerequisites
+# -----------------------------------------------------------------------------
+
+- name: Service | Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  tags:
+    - mongodb-service
+
+# -----------------------------------------------------------------------------
+# MongoDB Service Management
+# -----------------------------------------------------------------------------
+
+- name: Service | Enable MongoDB service
+  ansible.builtin.systemd:
+    name: "{{ mongodb_service_name }}"
+    enabled: "{{ mongodb_service_enabled }}"
+  tags:
+    - mongodb-service
+
+- name: Service | Start MongoDB service
+  ansible.builtin.systemd:
+    name: "{{ mongodb_service_name }}"
+    state: "{{ mongodb_service_state }}"
+  register: _mongodb_service_start
+  tags:
+    - mongodb-service
+
+- name: Service | Wait for MongoDB to start
+  ansible.builtin.wait_for:
+    port: "{{ mongodb_port }}"
+    host: "{{ mongodb_bind_ip.split(',')[0] | default('127.0.0.1') }}"
+    delay: 5
+    timeout: 120
+    state: started
+  when: mongodb_service_state == 'started'
+  tags:
+    - mongodb-service
+
+# -----------------------------------------------------------------------------
+# Verify Service Status
+# -----------------------------------------------------------------------------
+
+- name: Service | Check MongoDB service status
+  ansible.builtin.systemd:
+    name: "{{ mongodb_service_name }}"
+  register: _mongodb_service_status
+  tags:
+    - mongodb-service
+
+- name: Service | Display service status
+  ansible.builtin.debug:
+    msg: |
+      MongoDB Service Status:
+      - Active: {{ _mongodb_service_status.status.ActiveState }}
+      - Enabled: {{ _mongodb_service_status.status.UnitFileState }}
+      - PID: {{ _mongodb_service_status.status.MainPID | default('N/A') }}
+  tags:
+    - mongodb-service
+
+# -----------------------------------------------------------------------------
+# Connection Verification
+# -----------------------------------------------------------------------------
+
+- name: Service | Set bind host for connection check
+  ansible.builtin.set_fact:
+    _mongodb_bind_host: "{{ mongodb_bind_ip.split(',')[0] | default('127.0.0.1') }}"
+  tags:
+    - mongodb-service
+
+- name: Service | Wait for MongoDB to be ready for connections
+  ansible.builtin.command: >
+    mongosh --host {{ _mongodb_bind_host }}
+    --port {{ mongodb_port }}
+    --eval "db.adminCommand('ping')"
+    --quiet
+  register: _mongodb_ping
+  until: _mongodb_ping.rc == 0
+  retries: "{{ _mongodb_connect_retries }}"
+  delay: "{{ _mongodb_connect_delay }}"
+  changed_when: false
+  when:
+    - mongodb_service_state == 'started'
+    - not mongodb_security_auth_enabled
+  tags:
+    - mongodb-service
+
+- name: Service | Wait for MongoDB to be ready (with auth)
+  ansible.builtin.command: >
+    mongosh --host {{ _mongodb_bind_host }}
+    --port {{ mongodb_port }}
+    --eval "db.adminCommand('ping')"
+    --quiet
+  register: _mongodb_ping_auth
+  until: _mongodb_ping_auth.rc == 0
+  retries: "{{ _mongodb_connect_retries }}"
+  delay: "{{ _mongodb_connect_delay }}"
+  changed_when: false
+  failed_when: false
+  when:
+    - mongodb_service_state == 'started'
+    - mongodb_security_auth_enabled
+  tags:
+    - mongodb-service
+
+# -----------------------------------------------------------------------------
+# Process Verification
+# -----------------------------------------------------------------------------
+
+- name: Service | Verify MongoDB process is running
+  ansible.builtin.shell: |
+    pgrep -x mongod
+  register: _mongodb_process
+  changed_when: false
+  failed_when: false
+  tags:
+    - mongodb-service
+
+- name: Service | Display process information
+  ansible.builtin.debug:
+    msg: "MongoDB process ID: {{ _mongodb_process.stdout }}"
+  when:
+    - _mongodb_process.rc == 0
+    - mongodb_debug_mode
+  tags:
+    - mongodb-service
+
+# -----------------------------------------------------------------------------
+# Port Verification
+# -----------------------------------------------------------------------------
+
+- name: Service | Verify MongoDB is listening on configured port
+  ansible.builtin.shell: |
+    set -o pipefail
+    ss -tlnp | grep -q ":{{ mongodb_port }}"
+  args:
+    executable: /bin/bash
+  register: _mongodb_port_check
+  changed_when: false
+  failed_when: false
+  tags:
+    - mongodb-service
+
+- name: Service | Fail if MongoDB is not listening
+  ansible.builtin.fail:
+    msg: "MongoDB is not listening on port {{ mongodb_port }}"
+  when:
+    - _mongodb_port_check.rc != 0
+    - mongodb_service_state == 'started'
+  tags:
+    - mongodb-service
+
+# -----------------------------------------------------------------------------
+# Log Verification
+# -----------------------------------------------------------------------------
+
+- name: Service | Check MongoDB log for errors
+  ansible.builtin.shell: |
+    set -o pipefail
+    tail -50 {{ mongodb_log_file }} | grep -iE "(error|fatal|exception)" || true
+  args:
+    executable: /bin/bash
+  register: _mongodb_log_errors
+  changed_when: false
+  tags:
+    - mongodb-service
+
+- name: Service | Display log errors if any
+  ansible.builtin.debug:
+    msg: |
+      WARNING: Found potential errors in MongoDB log:
+      {{ _mongodb_log_errors.stdout }}
+  when:
+    - _mongodb_log_errors.stdout | length > 0
+    - mongodb_debug_mode
+  tags:
+    - mongodb-service
+
+# -----------------------------------------------------------------------------
+# Service Summary
+# -----------------------------------------------------------------------------
+
+- name: Service | Service management complete
+  ansible.builtin.debug:
+    msg: "MongoDB service is {{ mongodb_service_state }} and listening on port {{ mongodb_port }}"
+  tags:
+    - mongodb-service

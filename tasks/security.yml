@@ -1,0 +1,235 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Security Configuration Tasks
+# =============================================================================
+# Configures MongoDB security including keyfile, TLS, and authentication.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Keyfile Generation and Configuration
+# -----------------------------------------------------------------------------
+
+- name: Security | Generate random keyfile content if not provided
+  ansible.builtin.set_fact:
+    _mongodb_keyfile_generated: "{{ lookup('password', '/dev/null length=756 chars=ascii_letters,digits') | b64encode }}"
+  when:
+    - mongodb_keyfile_content | length == 0
+    - mongodb_deployment_mode in ['replicaset', 'sharded']
+  run_once: true
+  delegate_to: localhost
+  tags:
+    - mongodb-security
+
+- name: Security | Set keyfile content
+  ansible.builtin.set_fact:
+    _mongodb_keyfile_final: "{{ mongodb_keyfile_content if mongodb_keyfile_content | length > 0 else _mongodb_keyfile_generated | default('') }}"
+  when: mongodb_deployment_mode in ['replicaset', 'sharded']
+  tags:
+    - mongodb-security
+
+- name: Security | Create keyfile
+  ansible.builtin.copy:
+    content: "{{ _mongodb_keyfile_final }}"
+    dest: "{{ mongodb_keyfile_path }}"
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "{{ mongodb_keyfile_mode }}"
+  when:
+    - mongodb_deployment_mode in ['replicaset', 'sharded']
+    - _mongodb_keyfile_final is defined
+    - _mongodb_keyfile_final | length > 0
+  notify:
+    - Restart mongod
+  tags:
+    - mongodb-security
+
+- name: Security | Verify keyfile permissions
+  ansible.builtin.file:
+    path: "{{ mongodb_keyfile_path }}"
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "{{ mongodb_keyfile_mode }}"
+  when: mongodb_deployment_mode in ['replicaset', 'sharded']
+  tags:
+    - mongodb-security
+
+# -----------------------------------------------------------------------------
+# TLS Certificate Configuration
+# -----------------------------------------------------------------------------
+
+- name: Security | Create TLS certificate directory
+  ansible.builtin.file:
+    path: "{{ mongodb_tls_certificate_file | dirname }}"
+    state: directory
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0750"
+  when: mongodb_tls_enabled
+  tags:
+    - mongodb-security
+
+- name: Security | Check TLS certificate file exists
+  ansible.builtin.stat:
+    path: "{{ mongodb_tls_certificate_file }}"
+  register: _tls_cert_stat
+  when: mongodb_tls_enabled
+  tags:
+    - mongodb-security
+
+- name: Security | Fail if TLS certificate file is missing
+  ansible.builtin.fail:
+    msg: "TLS certificate file not found: {{ mongodb_tls_certificate_file }}"
+  when:
+    - mongodb_tls_enabled
+    - not _tls_cert_stat.stat.exists
+  tags:
+    - mongodb-security
+
+- name: Security | Check TLS key file exists
+  ansible.builtin.stat:
+    path: "{{ mongodb_tls_certificate_key_file }}"
+  register: _tls_key_stat
+  when: mongodb_tls_enabled
+  tags:
+    - mongodb-security
+
+- name: Security | Fail if TLS key file is missing
+  ansible.builtin.fail:
+    msg: "TLS key file not found: {{ mongodb_tls_certificate_key_file }}"
+  when:
+    - mongodb_tls_enabled
+    - not _tls_key_stat.stat.exists
+  tags:
+    - mongodb-security
+
+- name: Security | Check TLS CA file exists
+  ansible.builtin.stat:
+    path: "{{ mongodb_tls_ca_file }}"
+  register: _tls_ca_stat
+  when: mongodb_tls_enabled
+  tags:
+    - mongodb-security
+
+- name: Security | Fail if TLS CA file is missing
+  ansible.builtin.fail:
+    msg: "TLS CA file not found: {{ mongodb_tls_ca_file }}"
+  when:
+    - mongodb_tls_enabled
+    - not _tls_ca_stat.stat.exists
+  tags:
+    - mongodb-security
+
+- name: Security | Set TLS certificate permissions
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0600"
+  loop:
+    - "{{ mongodb_tls_certificate_file }}"
+    - "{{ mongodb_tls_certificate_key_file }}"
+  when: mongodb_tls_enabled
+  tags:
+    - mongodb-security
+
+- name: Security | Set TLS CA file permissions
+  ansible.builtin.file:
+    path: "{{ mongodb_tls_ca_file }}"
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0644"
+  when: mongodb_tls_enabled
+  tags:
+    - mongodb-security
+
+# -----------------------------------------------------------------------------
+# Combined PEM File Creation (if needed)
+# -----------------------------------------------------------------------------
+
+- name: Security | Check if combined PEM file is needed
+  ansible.builtin.stat:
+    path: "{{ mongodb_tls_certificate_key_file }}"
+  register: _combined_pem_check
+  when:
+    - mongodb_tls_enabled
+    - mongodb_tls_certificate_file != mongodb_tls_certificate_key_file
+  tags:
+    - mongodb-security
+
+# -----------------------------------------------------------------------------
+# Encryption at Rest (Enterprise Only)
+# -----------------------------------------------------------------------------
+
+- name: Security | Configure encryption key file permissions
+  ansible.builtin.file:
+    path: "{{ mongodb_encryption_key_file }}"
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0600"
+  when:
+    - mongodb_encryption_enabled
+    - mongodb_encryption_key_file | length > 0
+  tags:
+    - mongodb-security
+
+# -----------------------------------------------------------------------------
+# LDAP Configuration (Enterprise Only)
+# -----------------------------------------------------------------------------
+
+- name: Security | Configure LDAP settings
+  ansible.builtin.debug:
+    msg: "LDAP authentication is configured. Ensure LDAP server is accessible."
+  when: mongodb_ldap_enabled
+  tags:
+    - mongodb-security
+
+# -----------------------------------------------------------------------------
+# Kerberos Configuration (Enterprise Only)
+# -----------------------------------------------------------------------------
+
+- name: Security | Check Kerberos keytab file
+  ansible.builtin.stat:
+    path: "{{ mongodb_kerberos_keytab_path }}"
+  register: _kerberos_keytab_stat
+  when: mongodb_kerberos_enabled
+  tags:
+    - mongodb-security
+
+- name: Security | Fail if Kerberos keytab is missing
+  ansible.builtin.fail:
+    msg: "Kerberos keytab file not found: {{ mongodb_kerberos_keytab_path }}"
+  when:
+    - mongodb_kerberos_enabled
+    - not _kerberos_keytab_stat.stat.exists
+  tags:
+    - mongodb-security
+
+- name: Security | Set Kerberos keytab permissions
+  ansible.builtin.file:
+    path: "{{ mongodb_kerberos_keytab_path }}"
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0600"
+  when:
+    - mongodb_kerberos_enabled
+    - _kerberos_keytab_stat.stat.exists
+  tags:
+    - mongodb-security
+
+# -----------------------------------------------------------------------------
+# Security Summary
+# -----------------------------------------------------------------------------
+
+- name: Security | Display security configuration summary
+  ansible.builtin.debug:
+    msg: |
+      Security Configuration Summary:
+      - Authentication: {{ 'Enabled' if mongodb_security_auth_enabled else 'Disabled' }}
+      - Keyfile: {{ mongodb_keyfile_path if mongodb_deployment_mode in ['replicaset', 'sharded'] else 'N/A' }}
+      - TLS/SSL: {{ 'Enabled (' + mongodb_tls_mode + ')' if mongodb_tls_enabled else 'Disabled' }}
+      - LDAP: {{ 'Enabled' if mongodb_ldap_enabled else 'Disabled' }}
+      - Kerberos: {{ 'Enabled' if mongodb_kerberos_enabled else 'Disabled' }}
+      - Encryption at Rest: {{ 'Enabled' if mongodb_encryption_enabled else 'Disabled' }}
+  when: mongodb_debug_mode
+  tags:
+    - mongodb-security

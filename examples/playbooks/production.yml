@@ -1,0 +1,118 @@
+---
+# =============================================================================
+# MongoDB Production Deployment Playbook
+# =============================================================================
+# Complete production-ready playbook with all security and HA features.
+# =============================================================================
+
+- name: Pre-flight checks
+  hosts: mongodb
+  become: true
+  gather_facts: true
+  
+  tasks:
+    - name: Verify minimum requirements
+      ansible.builtin.assert:
+        that:
+          - ansible_memtotal_mb >= 4096
+          - ansible_processor_vcpus >= 2
+        fail_msg: "Minimum requirements: 4GB RAM, 2 CPUs"
+        success_msg: "System meets minimum requirements"
+
+    - name: Verify network connectivity between nodes
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item].ansible_host }}"
+        port: 22
+        timeout: 10
+      loop: "{{ groups['mongodb'] }}"
+      when: inventory_hostname != item
+
+- name: Deploy MongoDB Cluster
+  hosts: mongodb
+  become: true
+  serial: "{{ mongodb_serial | default(omit) }}"
+
+  vars_files:
+    - ../group_vars/mongodb.yml
+    - ../group_vars/vault.yml
+
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == 'Debian'
+
+    - name: Install required packages
+      ansible.builtin.package:
+        name:
+          - curl
+          - gnupg
+          - ca-certificates
+        state: present
+
+  roles:
+    - role: ansible-mongodb-cluster
+      tags:
+        - mongodb
+
+  post_tasks:
+    - name: Wait for cluster stabilization
+      ansible.builtin.pause:
+        seconds: 30
+      run_once: true
+      when: mongodb_deployment_mode == 'replicaset'
+
+    - name: Verify cluster health
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        -u {{ mongodb_admin_user }} -p '{{ mongodb_admin_password }}'
+        --authenticationDatabase admin
+        --eval "rs.status().ok"
+        --quiet
+      register: cluster_health
+      changed_when: false
+      run_once: true
+      when: mongodb_deployment_mode == 'replicaset'
+
+    - name: Display cluster status
+      ansible.builtin.debug:
+        msg: "Cluster health: {{ 'HEALTHY' if cluster_health.stdout == '1' else 'UNHEALTHY' }}"
+      run_once: true
+      when: mongodb_deployment_mode == 'replicaset'
+
+- name: Configure Application Users
+  hosts: mongodb[0]
+  become: true
+  
+  tasks:
+    - name: Create application database
+      community.mongodb.mongodb_shell:
+        login_host: localhost
+        login_port: "{{ mongodb_port }}"
+        login_user: "{{ mongodb_admin_user }}"
+        login_password: "{{ mongodb_admin_password }}"
+        login_database: admin
+        eval: "db.getSiblingDB('{{ item }}').createCollection('_init')"
+      loop: "{{ mongodb_application_databases | default([]) }}"
+      failed_when: false
+
+- name: Final Validation
+  hosts: mongodb
+  become: true
+  
+  tasks:
+    - name: Run comprehensive health check
+      ansible.builtin.include_role:
+        name: ansible-mongodb-cluster
+        tasks_from: healthcheck.yml
+      tags:
+        - healthcheck
+
+    - name: Generate deployment report
+      ansible.builtin.template:
+        src: deployment-report.j2
+        dest: /root/mongodb-deployment-report.txt
+        mode: "0600"
+      run_once: true
+      delegate_to: "{{ groups['mongodb'][0] }}"

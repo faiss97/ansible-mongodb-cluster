@@ -1,0 +1,278 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Installation Tasks
+# =============================================================================
+# Installs MongoDB packages from official MongoDB repositories.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Debian/Ubuntu Installation
+# -----------------------------------------------------------------------------
+
+- name: Install | Debian/Ubuntu - Install prerequisites
+  ansible.builtin.apt:
+    name: "{{ _mongodb_apt_dependencies }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == 'Debian'
+  tags:
+    - mongodb-install
+
+- name: Install | Debian/Ubuntu - Create keyring directory
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    mode: "0755"
+  when: ansible_os_family == 'Debian'
+  tags:
+    - mongodb-install
+
+- name: Install | Debian/Ubuntu - Download MongoDB GPG key
+  ansible.builtin.shell: |
+    curl -fsSL {{ mongodb_gpg_key_url }} | gpg --dearmor -o {{ _mongodb_gpg_key_path }}
+  args:
+    creates: "{{ _mongodb_gpg_key_path }}"
+  when: ansible_os_family == 'Debian'
+  tags:
+    - mongodb-install
+
+- name: Install | Debian/Ubuntu - Set GPG key permissions
+  ansible.builtin.file:
+    path: "{{ _mongodb_gpg_key_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: ansible_os_family == 'Debian'
+  tags:
+    - mongodb-install
+
+- name: Install | Debian/Ubuntu - Add MongoDB repository
+  ansible.builtin.template:
+    src: mongodb.list.j2
+    dest: "{{ _mongodb_repo_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: _mongodb_repo_added
+  when: ansible_os_family == 'Debian'
+  tags:
+    - mongodb-install
+
+- name: Install | Debian/Ubuntu - Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+  when:
+    - ansible_os_family == 'Debian'
+    - _mongodb_repo_added.changed
+  tags:
+    - mongodb-install
+
+- name: Install | Debian/Ubuntu - Install MongoDB packages
+  ansible.builtin.apt:
+    name: "{{ mongodb_packages }}"
+    state: present
+    allow_unauthenticated: false
+  when: ansible_os_family == 'Debian'
+  notify:
+    - Restart mongod
+  tags:
+    - mongodb-install
+
+- name: Install | Debian/Ubuntu - Install specific version
+  ansible.builtin.apt:
+    name: "{{ item }}={{ mongodb_package_version }}*"
+    state: present
+    allow_downgrade: true
+  loop: "{{ mongodb_packages }}"
+  when:
+    - ansible_os_family == 'Debian'
+    - mongodb_package_version | length > 0
+  notify:
+    - Restart mongod
+  tags:
+    - mongodb-install
+
+- name: Install | Debian/Ubuntu - Hold MongoDB packages
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ mongodb_packages }}"
+  when:
+    - ansible_os_family == 'Debian'
+    - mongodb_version_pinned
+  tags:
+    - mongodb-install
+
+# -----------------------------------------------------------------------------
+# RHEL/CentOS/Rocky/Alma Installation
+# -----------------------------------------------------------------------------
+
+- name: Install | RedHat - Install prerequisites
+  ansible.builtin.package:
+    name: "{{ _mongodb_yum_dependencies }}"
+    state: present
+  when: ansible_os_family == 'RedHat'
+  tags:
+    - mongodb-install
+
+- name: Install | RedHat - Add MongoDB repository
+  ansible.builtin.template:
+    src: mongodb.repo.j2
+    dest: "{{ _mongodb_repo_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: _mongodb_repo_added_rhel
+  when: ansible_os_family == 'RedHat'
+  tags:
+    - mongodb-install
+
+- name: Install | RedHat - Clean yum/dnf cache
+  ansible.builtin.command: "{{ _mongodb_pkg_mgr_override }} clean all"
+  when:
+    - ansible_os_family == 'RedHat'
+    - _mongodb_repo_added_rhel.changed
+  changed_when: true
+  tags:
+    - mongodb-install
+
+- name: Install | RedHat - Install MongoDB packages
+  ansible.builtin.package:
+    name: "{{ mongodb_packages }}"
+    state: present
+  when: ansible_os_family == 'RedHat'
+  notify:
+    - Restart mongod
+  tags:
+    - mongodb-install
+
+- name: Install | RedHat - Install specific version
+  ansible.builtin.package:
+    name: "{{ item }}-{{ mongodb_package_version }}"
+    state: present
+    allow_downgrade: true
+  loop: "{{ mongodb_packages }}"
+  when:
+    - ansible_os_family == 'RedHat'
+    - mongodb_package_version | length > 0
+  notify:
+    - Restart mongod
+  tags:
+    - mongodb-install
+
+- name: Install | RedHat - Install versionlock plugin
+  ansible.builtin.package:
+    name: "{{ _mongodb_versionlock_package }}"
+    state: present
+  when:
+    - ansible_os_family == 'RedHat'
+    - mongodb_version_pinned
+  tags:
+    - mongodb-install
+
+- name: Install | RedHat - Lock MongoDB packages version
+  ansible.builtin.shell: |
+    {{ _mongodb_pkg_mgr_override }} versionlock add {{ item }} || true
+  loop: "{{ mongodb_packages }}"
+  when:
+    - ansible_os_family == 'RedHat'
+    - mongodb_version_pinned
+  changed_when: false
+  tags:
+    - mongodb-install
+
+# -----------------------------------------------------------------------------
+# Python Dependencies (for Ansible modules)
+# -----------------------------------------------------------------------------
+
+- name: Install | Install Python MongoDB driver
+  ansible.builtin.package:
+    name: "{{ _mongodb_python_packages }}"
+    state: present
+  failed_when: false
+  tags:
+    - mongodb-install
+
+- name: Install | Install pymongo via pip (fallback)
+  ansible.builtin.pip:
+    name: pymongo
+    state: present
+  when: ansible_python_version is version('3.6', '>=')
+  failed_when: false
+  tags:
+    - mongodb-install
+
+# -----------------------------------------------------------------------------
+# Verify Installation
+# -----------------------------------------------------------------------------
+
+- name: Install | Verify MongoDB installation
+  ansible.builtin.command: mongod --version
+  register: _mongodb_version_check
+  changed_when: false
+  tags:
+    - mongodb-install
+
+- name: Install | Display installed MongoDB version
+  ansible.builtin.debug:
+    msg: "MongoDB Version: {{ _mongodb_version_check.stdout_lines[0] }}"
+  tags:
+    - mongodb-install
+
+- name: Install | Verify mongosh installation
+  ansible.builtin.command: mongosh --version
+  register: _mongosh_version_check
+  changed_when: false
+  failed_when: false
+  tags:
+    - mongodb-install
+
+- name: Install | Display mongosh version
+  ansible.builtin.debug:
+    msg: "mongosh Version: {{ _mongosh_version_check.stdout | default('Not installed') }}"
+  when: _mongosh_version_check.rc == 0
+  tags:
+    - mongodb-install
+
+# -----------------------------------------------------------------------------
+# Create MongoDB User and Group
+# -----------------------------------------------------------------------------
+
+- name: Install | Ensure MongoDB group exists
+  ansible.builtin.group:
+    name: "{{ mongodb_group }}"
+    state: present
+    system: true
+  tags:
+    - mongodb-install
+
+- name: Install | Ensure MongoDB user exists
+  ansible.builtin.user:
+    name: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    home: "{{ mongodb_data_directory }}"
+    shell: /bin/false
+    system: true
+    create_home: false
+  tags:
+    - mongodb-install
+
+# -----------------------------------------------------------------------------
+# Set Ownership
+# -----------------------------------------------------------------------------
+
+- name: Install | Set ownership of MongoDB directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0755"
+    recurse: true
+  loop:
+    - "{{ mongodb_data_directory }}"
+    - "{{ mongodb_log_directory }}"
+    - "{{ mongodb_pid_directory }}"
+  tags:
+    - mongodb-install

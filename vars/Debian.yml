@@ -1,0 +1,69 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Debian/Ubuntu Variables
+# =============================================================================
+
+# Package manager
+_mongodb_pkg_mgr: "apt"
+
+# MongoDB repository configuration
+_mongodb_repo_filename: "mongodb-org-{{ mongodb_version }}"
+_mongodb_repo_path: "/etc/apt/sources.list.d/{{ _mongodb_repo_filename }}.list"
+
+# Repository URL based on distribution
+_mongodb_apt_repo_url: "{{ mongodb_repo_apt_url }}/{{ ansible_distribution | lower }}"
+
+# GPG key path
+_mongodb_gpg_key_path: "/usr/share/keyrings/mongodb-server-{{ mongodb_version }}.gpg"
+
+# Distribution codename mapping for older releases
+_mongodb_distro_codename: "{{ ansible_distribution_release }}"
+
+# Repository components
+_mongodb_apt_repo_component: "multiverse"
+
+# Required dependencies for apt
+_mongodb_apt_dependencies:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - software-properties-common
+
+# Python dependencies
+_mongodb_python_packages:
+  - python3-pymongo
+
+# Package hold command for version pinning
+_mongodb_package_hold_cmd: "apt-mark hold"
+_mongodb_package_unhold_cmd: "apt-mark unhold"
+
+# Service file path
+_mongodb_systemd_unit_path: "/lib/systemd/system/mongod.service"
+
+# Default data directory for Debian
+_mongodb_default_data_dir: "/var/lib/mongodb"
+
+# Default log directory for Debian
+_mongodb_default_log_dir: "/var/log/mongodb"
+
+# SELinux is not typically used on Debian
+_mongodb_selinux_available: false
+
+# Firewall backend default
+_mongodb_firewall_default: "ufw"
+
+# Limits configuration file
+_mongodb_limits_conf_path: "/etc/security/limits.d/mongodb.conf"
+
+# Systemd override directory
+_mongodb_systemd_override_dir: "/etc/systemd/system/mongod.service.d"
+
+# THP disable service
+_mongodb_thp_service_name: "disable-transparent-hugepages"
+
+# Logrotate configuration
+_mongodb_logrotate_conf: "/etc/logrotate.d/mongodb"
+
+# Update alternatives for mongosh
+_mongodb_alternatives_cmd: "update-alternatives"

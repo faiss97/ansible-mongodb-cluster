@@ -1,0 +1,209 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Configuration Tasks
+# =============================================================================
+# Configures MongoDB using mongod.conf template.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Check Existing Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure | Check if MongoDB config file exists
+  ansible.builtin.stat:
+    path: "{{ mongodb_config_file }}"
+  register: _mongodb_config_stat
+  tags:
+    - mongodb-configure
+
+- name: Configure | Backup existing configuration
+  ansible.builtin.copy:
+    src: "{{ mongodb_config_file }}"
+    dest: "{{ mongodb_config_file }}.backup.{{ ansible_date_time.iso8601_basic_short }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  when: _mongodb_config_stat.stat.exists
+  changed_when: false
+  tags:
+    - mongodb-configure
+
+# -----------------------------------------------------------------------------
+# Calculate WiredTiger Cache Size
+# -----------------------------------------------------------------------------
+
+- name: Configure | Calculate WiredTiger cache size if not specified
+  ansible.builtin.set_fact:
+    _mongodb_wiredtiger_cache_calculated: >-
+      {{ ((ansible_memtotal_mb - 1024) * 0.5 / 1024) | round(1) if ansible_memtotal_mb > 2048 else 0.25 }}
+  when: mongodb_wiredtiger_cache_size_gb | length == 0
+  tags:
+    - mongodb-configure
+
+- name: Configure | Set final WiredTiger cache size
+  ansible.builtin.set_fact:
+    _mongodb_wiredtiger_cache_final: >-
+      {{ mongodb_wiredtiger_cache_size_gb if mongodb_wiredtiger_cache_size_gb | length > 0 else _mongodb_wiredtiger_cache_calculated }}
+  tags:
+    - mongodb-configure
+
+# -----------------------------------------------------------------------------
+# Build Replica Set Member List
+# -----------------------------------------------------------------------------
+
+- name: Configure | Build replica set members from inventory if not defined
+  ansible.builtin.set_fact:
+    _mongodb_replicaset_members_computed: >-
+      {{ mongodb_replicaset_members if mongodb_replicaset_members | length > 0 else
+         groups[mongodb_replicaset_group | default('mongodb')] | default([inventory_hostname]) |
+         map('regex_replace', '^(.*)$', '{"host": "\1:' + (mongodb_port | string) + '", "priority": 1, "votes": 1}') |
+         map('from_json') | list }}
+  when: mongodb_deployment_mode == 'replicaset'
+  tags:
+    - mongodb-configure
+
+# -----------------------------------------------------------------------------
+# Generate MongoDB Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure | Generate mongod.conf configuration file
+  ansible.builtin.template:
+    src: mongod.conf.j2
+    dest: "{{ mongodb_config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "mongod --config %s --validate"
+  notify:
+    - Restart mongod
+  tags:
+    - mongodb-configure
+
+# -----------------------------------------------------------------------------
+# Mongos Configuration (for Sharded Clusters)
+# -----------------------------------------------------------------------------
+
+- name: Configure | Generate mongos.conf for router nodes
+  ansible.builtin.template:
+    src: mongos.conf.j2
+    dest: /etc/mongos.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - mongodb_deployment_mode == 'sharded'
+    - mongodb_mongos_router
+  notify:
+    - Restart mongos
+  tags:
+    - mongodb-configure
+
+- name: Configure | Create mongos systemd service
+  ansible.builtin.template:
+    src: mongos.service.j2
+    dest: /etc/systemd/system/mongos.service
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - mongodb_deployment_mode == 'sharded'
+    - mongodb_mongos_router
+  notify:
+    - Reload systemd
+    - Restart mongos
+  tags:
+    - mongodb-configure
+
+# -----------------------------------------------------------------------------
+# Config Server Configuration (for Sharded Clusters)
+# -----------------------------------------------------------------------------
+
+- name: Configure | Adjust config for config server role
+  ansible.builtin.set_fact:
+    _mongodb_is_config_server: true
+  when:
+    - mongodb_deployment_mode == 'sharded'
+    - mongodb_config_server
+  tags:
+    - mongodb-configure
+
+# -----------------------------------------------------------------------------
+# Environment Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure | Create MongoDB environment file
+  ansible.builtin.template:
+    src: mongodb.env.j2
+    dest: /etc/default/mongod
+    owner: root
+    group: root
+    mode: "0644"
+  when: ansible_os_family == 'Debian'
+  notify:
+    - Restart mongod
+  tags:
+    - mongodb-configure
+
+- name: Configure | Create MongoDB sysconfig file
+  ansible.builtin.template:
+    src: mongodb.sysconfig.j2
+    dest: /etc/sysconfig/mongod
+    owner: root
+    group: root
+    mode: "0644"
+  when: ansible_os_family == 'RedHat'
+  notify:
+    - Restart mongod
+  tags:
+    - mongodb-configure
+
+# -----------------------------------------------------------------------------
+# Verify Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure | Validate MongoDB configuration syntax
+  ansible.builtin.command: >
+    mongod --config {{ mongodb_config_file }} --validate
+  register: _mongodb_config_validate
+  changed_when: false
+  failed_when: false
+  tags:
+    - mongodb-configure
+
+- name: Configure | Display configuration validation result
+  ansible.builtin.debug:
+    msg: "Configuration validation: {{ 'PASSED' if _mongodb_config_validate.rc == 0 else 'FAILED - ' + _mongodb_config_validate.stderr }}"
+  tags:
+    - mongodb-configure
+
+- name: Configure | Fail if configuration is invalid
+  ansible.builtin.fail:
+    msg: "MongoDB configuration validation failed: {{ _mongodb_config_validate.stderr }}"
+  when: _mongodb_config_validate.rc != 0
+  tags:
+    - mongodb-configure
+
+# -----------------------------------------------------------------------------
+# Configuration Summary
+# -----------------------------------------------------------------------------
+
+- name: Configure | Display configuration summary
+  ansible.builtin.debug:
+    msg: |
+      MongoDB Configuration Summary:
+      - Config File: {{ mongodb_config_file }}
+      - Data Directory: {{ mongodb_data_directory }}
+      - Log File: {{ mongodb_log_file }}
+      - Port: {{ mongodb_port }}
+      - Bind IP: {{ mongodb_bind_ip }}
+      - Storage Engine: {{ mongodb_storage_engine }}
+      - WiredTiger Cache: {{ _mongodb_wiredtiger_cache_final }} GB
+      - Journal: {{ 'Enabled' if mongodb_storage_journal_enabled else 'Disabled' }}
+      - Auth: {{ 'Enabled' if mongodb_security_auth_enabled else 'Disabled' }}
+      {% if mongodb_deployment_mode == 'replicaset' %}
+      - Replica Set: {{ mongodb_replicaset_name }}
+      {% endif %}
+  when: mongodb_debug_mode
+  tags:
+    - mongodb-configure

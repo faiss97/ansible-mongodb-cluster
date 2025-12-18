@@ -1,0 +1,88 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - RedHat/CentOS/Rocky/Alma Variables
+# =============================================================================
+
+# Package manager
+_mongodb_pkg_mgr: "yum"
+
+# Use dnf for newer versions
+_mongodb_pkg_mgr_override: >-
+  {{ 'dnf' if ansible_distribution_major_version | int >= 8 else 'yum' }}
+
+# MongoDB repository configuration
+_mongodb_repo_filename: "mongodb-org-{{ mongodb_version }}"
+_mongodb_repo_path: "/etc/yum.repos.d/{{ _mongodb_repo_filename }}.repo"
+
+# Repository URL
+_mongodb_yum_repo_baseurl: "{{ mongodb_repo_baseurl }}"
+
+# GPG key URL
+_mongodb_gpg_key_url: "{{ mongodb_gpg_key_url }}"
+
+# GPG check enabled
+_mongodb_yum_gpgcheck: true
+
+# Required dependencies for yum/dnf
+_mongodb_yum_dependencies:
+  - yum-utils
+  - curl
+  - policycoreutils-python-utils
+
+# Python dependencies
+_mongodb_python_packages:
+  - python3-pymongo
+
+# Package version lock commands
+_mongodb_package_lock_cmd: "yum versionlock"
+_mongodb_package_unlock_cmd: "yum versionlock delete"
+
+# For dnf
+_mongodb_dnf_lock_cmd: "dnf versionlock"
+_mongodb_dnf_unlock_cmd: "dnf versionlock delete"
+
+# Version lock package
+_mongodb_versionlock_package: >-
+  {{ 'yum-plugin-versionlock' if ansible_distribution_major_version | int < 8 else 'python3-dnf-plugin-versionlock' }}
+
+# Service file path
+_mongodb_systemd_unit_path: "/usr/lib/systemd/system/mongod.service"
+
+# Default data directory for RHEL
+_mongodb_default_data_dir: "/var/lib/mongo"
+
+# Default log directory for RHEL
+_mongodb_default_log_dir: "/var/log/mongodb"
+
+# SELinux is typically used on RHEL
+_mongodb_selinux_available: true
+
+# SELinux packages
+_mongodb_selinux_packages:
+  - policycoreutils
+  - policycoreutils-python-utils
+  - selinux-policy
+  - selinux-policy-targeted
+  - checkpolicy
+
+# Firewall backend default
+_mongodb_firewall_default: "firewalld"
+
+# Limits configuration file
+_mongodb_limits_conf_path: "/etc/security/limits.d/99-mongodb.conf"
+
+# Systemd override directory
+_mongodb_systemd_override_dir: "/etc/systemd/system/mongod.service.d"
+
+# THP disable service
+_mongodb_thp_service_name: "disable-transparent-hugepages"
+
+# Tuned profile for MongoDB
+_mongodb_tuned_profile: "throughput-performance"
+
+# Logrotate configuration
+_mongodb_logrotate_conf: "/etc/logrotate.d/mongodb"
+
+# EPEL repository (for additional tools)
+_mongodb_epel_enabled: true
+_mongodb_epel_package: "epel-release"

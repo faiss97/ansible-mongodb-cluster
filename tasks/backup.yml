@@ -1,0 +1,156 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Backup Configuration Tasks
+# =============================================================================
+# Configures automated MongoDB backups using mongodump.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Backup Directory Setup
+# -----------------------------------------------------------------------------
+
+- name: Backup | Create backup directory
+  ansible.builtin.file:
+    path: "{{ mongodb_backup_directory }}"
+    state: directory
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0750"
+  tags:
+    - mongodb-backup
+
+- name: Backup | Create backup log directory
+  ansible.builtin.file:
+    path: "{{ mongodb_backup_directory }}/logs"
+    state: directory
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0750"
+  tags:
+    - mongodb-backup
+
+# -----------------------------------------------------------------------------
+# Backup Script
+# -----------------------------------------------------------------------------
+
+- name: Backup | Create MongoDB backup script
+  ansible.builtin.template:
+    src: mongodb-backup.sh.j2
+    dest: /usr/local/bin/mongodb-backup.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-backup
+
+- name: Backup | Create backup credentials file
+  ansible.builtin.template:
+    src: mongodb-backup-credentials.j2
+    dest: /etc/mongodb-backup-credentials
+    owner: root
+    group: root
+    mode: "0600"
+  when: mongodb_security_auth_enabled
+  tags:
+    - mongodb-backup
+
+# -----------------------------------------------------------------------------
+# Backup Cron Job
+# -----------------------------------------------------------------------------
+
+- name: Backup | Configure backup cron job
+  ansible.builtin.cron:
+    name: "MongoDB Backup"
+    minute: "{{ mongodb_backup_schedule.minute }}"
+    hour: "{{ mongodb_backup_schedule.hour }}"
+    day: "{{ mongodb_backup_schedule.day }}"
+    month: "{{ mongodb_backup_schedule.month }}"
+    weekday: "{{ mongodb_backup_schedule.weekday }}"
+    job: "/usr/local/bin/mongodb-backup.sh >> {{ mongodb_backup_directory }}/logs/backup.log 2>&1"
+    user: root
+    state: present
+  tags:
+    - mongodb-backup
+
+# -----------------------------------------------------------------------------
+# Backup Retention Cleanup
+# -----------------------------------------------------------------------------
+
+- name: Backup | Create backup cleanup script
+  ansible.builtin.template:
+    src: mongodb-backup-cleanup.sh.j2
+    dest: /usr/local/bin/mongodb-backup-cleanup.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-backup
+
+- name: Backup | Configure cleanup cron job
+  ansible.builtin.cron:
+    name: "MongoDB Backup Cleanup"
+    minute: "30"
+    hour: "3"
+    day: "*"
+    month: "*"
+    weekday: "*"
+    job: "/usr/local/bin/mongodb-backup-cleanup.sh >> {{ mongodb_backup_directory }}/logs/cleanup.log 2>&1"
+    user: root
+    state: present
+  tags:
+    - mongodb-backup
+
+# -----------------------------------------------------------------------------
+# S3 Backup Configuration (Optional)
+# -----------------------------------------------------------------------------
+
+- name: Backup | Install AWS CLI for S3 backups
+  ansible.builtin.package:
+    name:
+      - awscli
+    state: present
+  when: mongodb_backup_s3_enabled
+  tags:
+    - mongodb-backup
+
+- name: Backup | Create S3 upload script
+  ansible.builtin.template:
+    src: mongodb-backup-s3.sh.j2
+    dest: /usr/local/bin/mongodb-backup-s3.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: mongodb_backup_s3_enabled
+  tags:
+    - mongodb-backup
+
+# -----------------------------------------------------------------------------
+# Backup Verification
+# -----------------------------------------------------------------------------
+
+- name: Backup | Create backup verification script
+  ansible.builtin.template:
+    src: mongodb-backup-verify.sh.j2
+    dest: /usr/local/bin/mongodb-backup-verify.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-backup
+
+# -----------------------------------------------------------------------------
+# Backup Summary
+# -----------------------------------------------------------------------------
+
+- name: Backup | Display backup configuration summary
+  ansible.builtin.debug:
+    msg: |
+      Backup Configuration Summary:
+      - Directory: {{ mongodb_backup_directory }}
+      - Method: {{ mongodb_backup_method }}
+      - Schedule: {{ mongodb_backup_schedule.minute }} {{ mongodb_backup_schedule.hour }} {{ mongodb_backup_schedule.day }} {{ mongodb_backup_schedule.month }} {{ mongodb_backup_schedule.weekday }}
+      - Retention: {{ mongodb_backup_retention_days }} days
+      - Compression: {{ 'Enabled' if mongodb_backup_compression else 'Disabled' }}
+      - S3 Upload: {{ 'Enabled' if mongodb_backup_s3_enabled else 'Disabled' }}
+  tags:
+    - mongodb-backup

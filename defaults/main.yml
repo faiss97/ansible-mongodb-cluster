@@ -1,0 +1,707 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Default Variables
+# =============================================================================
+# This file contains all configurable variables for the MongoDB role.
+# Override these in your inventory, group_vars, or host_vars as needed.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# MongoDB Version and Installation
+# -----------------------------------------------------------------------------
+
+# MongoDB version to install (major.minor format for repo)
+mongodb_version: "7.0"
+
+# Specific package version (leave empty for latest in repo)
+# Example: "7.0.12" for pinning
+mongodb_package_version: ""
+
+# Whether to pin the package version to prevent automatic upgrades
+mongodb_version_pinned: true
+
+# MongoDB packages to install
+mongodb_packages:
+  - mongodb-org
+  - mongodb-org-database
+  - mongodb-org-server
+  - mongodb-mongosh
+  - mongodb-org-tools
+
+# MongoDB repository base URL
+mongodb_repo_baseurl: "https://repo.mongodb.org/yum/redhat/$releasever/mongodb-org/{{ mongodb_version }}/x86_64/"
+mongodb_repo_apt_url: "https://repo.mongodb.org/apt"
+
+# MongoDB GPG key URL
+mongodb_gpg_key_url: "https://pgp.mongodb.com/server-{{ mongodb_version }}.asc"
+
+# MongoDB GPG key ID (for apt)
+mongodb_gpg_key_id: "B00A0BD1E2C63C11"
+
+# -----------------------------------------------------------------------------
+# Deployment Mode
+# -----------------------------------------------------------------------------
+
+# Deployment mode: "standalone", "replicaset", or "sharded"
+mongodb_deployment_mode: "replicaset"
+
+# Whether to configure as config server (for sharded clusters)
+mongodb_config_server: false
+
+# Whether this is a mongos router (for sharded clusters)
+mongodb_mongos_router: false
+
+# -----------------------------------------------------------------------------
+# System Configuration
+# -----------------------------------------------------------------------------
+
+# MongoDB user and group
+mongodb_user: "mongod"
+mongodb_group: "mongod"
+
+# MongoDB directories
+mongodb_data_directory: "/var/lib/mongo"
+mongodb_log_directory: "/var/log/mongodb"
+mongodb_pid_directory: "/var/run/mongodb"
+mongodb_config_directory: "/etc"
+
+# MongoDB config file path
+mongodb_config_file: "{{ mongodb_config_directory }}/mongod.conf"
+
+# MongoDB log file
+mongodb_log_file: "{{ mongodb_log_directory }}/mongod.log"
+
+# MongoDB PID file
+mongodb_pid_file: "{{ mongodb_pid_directory }}/mongod.pid"
+
+# MongoDB service name
+mongodb_service_name: "mongod"
+
+# Enable MongoDB service on boot
+mongodb_service_enabled: true
+
+# MongoDB service state
+mongodb_service_state: "started"
+
+# -----------------------------------------------------------------------------
+# Network Configuration
+# -----------------------------------------------------------------------------
+
+# MongoDB port
+mongodb_port: 27017
+
+# MongoDB bind IP addresses
+# Use "0.0.0.0" to bind to all interfaces (not recommended for production)
+# Use comma-separated list for multiple interfaces
+mongodb_bind_ip: "127.0.0.1,{{ ansible_default_ipv4.address | default('127.0.0.1') }}"
+
+# Enable IPv6
+mongodb_ipv6: false
+
+# Max incoming connections
+mongodb_max_connections: 65536
+
+# Wire protocol compression (snappy, zlib, zstd)
+mongodb_net_compression:
+  - snappy
+  - zstd
+  - zlib
+
+# Unix domain socket settings
+mongodb_unixdomainsocket_enabled: true
+mongodb_unixdomainsocket_path: "/tmp"
+
+# -----------------------------------------------------------------------------
+# Replica Set Configuration
+# -----------------------------------------------------------------------------
+
+# Replica set name
+mongodb_replicaset_name: "rs0"
+
+# Enable replica set oplog size in MB
+mongodb_oplog_size_mb: 2048
+
+# Replica set members configuration
+# This should be overridden in inventory/group_vars
+# Example:
+# mongodb_replicaset_members:
+#   - host: "mongo1.example.com:27017"
+#     priority: 2
+#     votes: 1
+#   - host: "mongo2.example.com:27017"
+#     priority: 1
+#     votes: 1
+#   - host: "mongo3.example.com:27017"
+#     priority: 1
+#     votes: 1
+mongodb_replicaset_members: []
+
+# Arbiter configuration (optional)
+mongodb_arbiter_enabled: false
+mongodb_arbiter_host: ""
+
+# Replica set settings
+mongodb_replicaset_settings:
+  # Protocol version (1 for pv1, default)
+  protocolVersion: 1
+  # Heartbeat interval in milliseconds
+  heartbeatIntervalMillis: 2000
+  # Election timeout in milliseconds
+  electionTimeoutMillis: 10000
+  # Catchup timeout in milliseconds (-1 for infinite)
+  catchUpTimeoutMillis: -1
+
+# Enable chaining (allow secondaries to replicate from other secondaries)
+mongodb_replicaset_chaining_allowed: true
+
+# Read preference for replica set connections
+mongodb_read_preference: "primaryPreferred"
+
+# Write concern for replica set
+mongodb_write_concern:
+  w: "majority"
+  j: true
+  wtimeout: 5000
+
+# -----------------------------------------------------------------------------
+# Sharded Cluster Configuration (Optional)
+# -----------------------------------------------------------------------------
+
+# Config server replica set name
+mongodb_config_replicaset_name: "configRS"
+
+# Config server port
+mongodb_config_port: 27019
+
+# Mongos router port
+mongodb_mongos_port: 27017
+
+# List of config servers for mongos
+# Example: ["config1.example.com:27019", "config2.example.com:27019", "config3.example.com:27019"]
+mongodb_config_servers: []
+
+# Shard configuration
+# Example:
+# mongodb_shards:
+#   - name: "shard1"
+#     members: "shard1rs/shard1a.example.com:27018,shard1b.example.com:27018,shard1c.example.com:27018"
+#   - name: "shard2"
+#     members: "shard2rs/shard2a.example.com:27018,shard2b.example.com:27018,shard2c.example.com:27018"
+mongodb_shards: []
+
+# Databases to enable sharding on
+mongodb_sharded_databases: []
+
+# Collections to shard
+# Example:
+# mongodb_sharded_collections:
+#   - database: "mydb"
+#     collection: "mycollection"
+#     key: { "user_id": "hashed" }
+#   - database: "mydb"
+#     collection: "logs"
+#     key: { "timestamp": 1, "region": 1 }
+mongodb_sharded_collections: []
+
+# Balancer state
+mongodb_balancer_state: "started"
+
+# Balancer window (optional)
+mongodb_balancer_window:
+  enabled: false
+  start: "23:00"
+  stop: "06:00"
+
+# -----------------------------------------------------------------------------
+# Security Configuration
+# -----------------------------------------------------------------------------
+
+# Enable authentication
+mongodb_security_auth_enabled: true
+
+# Authorization mode (enabled, disabled)
+mongodb_security_authorization: "enabled"
+
+# Keyfile for internal authentication (replica set / sharded cluster)
+mongodb_keyfile_path: "/etc/mongodb-keyfile"
+mongodb_keyfile_content: ""  # Will be auto-generated if empty
+
+# Keyfile permissions
+mongodb_keyfile_mode: "0400"
+
+# TLS/SSL Configuration
+mongodb_tls_enabled: false
+mongodb_tls_mode: "requireTLS"  # disabled, allowTLS, preferTLS, requireTLS
+mongodb_tls_certificate_file: ""
+mongodb_tls_certificate_key_file: ""
+mongodb_tls_ca_file: ""
+mongodb_tls_allow_invalid_certificates: false
+mongodb_tls_allow_invalid_hostnames: false
+mongodb_tls_disable_protocols: "TLS1_0,TLS1_1"
+
+# Client certificate validation mode
+mongodb_tls_cluster_auth_mode: "keyFile"  # keyFile, sendKeyFile, sendX509, x509
+
+# LDAP Configuration (optional)
+mongodb_ldap_enabled: false
+mongodb_ldap_servers: ""
+mongodb_ldap_bind_dn: ""
+mongodb_ldap_bind_password: ""
+mongodb_ldap_user_to_dn_mapping: ""
+
+# Kerberos Configuration (optional)
+mongodb_kerberos_enabled: false
+mongodb_kerberos_keytab_path: ""
+mongodb_kerberos_service_name: "mongodb"
+
+# Encryption at rest (Enterprise only)
+mongodb_encryption_enabled: false
+mongodb_encryption_key_file: ""
+
+# SCRAM-SHA authentication mechanisms
+mongodb_authentication_mechanisms:
+  - "SCRAM-SHA-256"
+  - "SCRAM-SHA-1"
+
+# JavaScript execution
+mongodb_security_javascript_enabled: true
+
+# Localhost bypass for first user creation
+mongodb_localhost_auth_bypass: true
+
+# -----------------------------------------------------------------------------
+# User Management
+# -----------------------------------------------------------------------------
+
+# Admin user configuration
+mongodb_admin_user: "admin"
+mongodb_admin_password: ""  # MUST be set in vault or secure variable
+
+# Admin roles
+mongodb_admin_roles:
+  - role: "root"
+    db: "admin"
+
+# Cluster admin user (for replica set/sharded cluster operations)
+mongodb_cluster_admin_user: "clusterAdmin"
+mongodb_cluster_admin_password: ""  # MUST be set in vault or secure variable
+mongodb_cluster_admin_roles:
+  - role: "clusterAdmin"
+    db: "admin"
+  - role: "dbAdminAnyDatabase"
+    db: "admin"
+  - role: "readWriteAnyDatabase"
+    db: "admin"
+
+# Application users to create
+# Example:
+# mongodb_users:
+#   - name: "appuser"
+#     password: "{{ vault_mongodb_appuser_password }}"
+#     database: "myapp"
+#     roles:
+#       - role: "readWrite"
+#         db: "myapp"
+#       - role: "read"
+#         db: "reporting"
+#   - name: "readonly"
+#     password: "{{ vault_mongodb_readonly_password }}"
+#     database: "myapp"
+#     roles:
+#       - role: "read"
+#         db: "myapp"
+mongodb_users: []
+
+# Backup user configuration
+mongodb_backup_user: "backup"
+mongodb_backup_password: ""
+mongodb_backup_roles:
+  - role: "backup"
+    db: "admin"
+  - role: "restore"
+    db: "admin"
+  - role: "clusterMonitor"
+    db: "admin"
+
+# Monitoring user configuration
+mongodb_monitoring_user: "monitoring"
+mongodb_monitoring_password: ""
+mongodb_monitoring_roles:
+  - role: "clusterMonitor"
+    db: "admin"
+  - role: "read"
+    db: "local"
+
+# Whether to create backup and monitoring users
+mongodb_create_backup_user: true
+mongodb_create_monitoring_user: true
+
+# Custom roles
+# Example:
+# mongodb_custom_roles:
+#   - name: "appReadWrite"
+#     database: "admin"
+#     privileges:
+#       - resource: { db: "myapp", collection: "" }
+#         actions: ["find", "insert", "update", "remove"]
+#     roles:
+#       - role: "read"
+#         db: "myapp"
+mongodb_custom_roles: []
+
+# -----------------------------------------------------------------------------
+# Storage Configuration
+# -----------------------------------------------------------------------------
+
+# Storage engine (wiredTiger, inMemory)
+mongodb_storage_engine: "wiredTiger"
+
+# Journal settings
+mongodb_storage_journal_enabled: true
+mongodb_storage_journal_commit_interval_ms: 100
+
+# Directory per database
+mongodb_storage_directory_per_db: true
+
+# WiredTiger cache size (in GB, empty for auto-calculated)
+# Default: 50% of (RAM - 1GB), or 256MB minimum
+mongodb_wiredtiger_cache_size_gb: ""
+
+# WiredTiger collection compression
+# Options: none, snappy, zlib, zstd
+mongodb_wiredtiger_collection_block_compressor: "snappy"
+
+# WiredTiger journal compressor
+mongodb_wiredtiger_journal_compressor: "snappy"
+
+# WiredTiger index prefix compression
+mongodb_wiredtiger_index_prefix_compression: true
+
+# WiredTiger concurrent read/write transactions
+mongodb_wiredtiger_concurrent_read_transactions: 128
+mongodb_wiredtiger_concurrent_write_transactions: 128
+
+# WiredTiger statistics log (for debugging)
+mongodb_wiredtiger_statistics_log_enabled: false
+
+# In-Memory engine settings (Enterprise only)
+mongodb_inmemory_size_gb: ""
+
+# -----------------------------------------------------------------------------
+# Operation Profiling
+# -----------------------------------------------------------------------------
+
+# Profiling mode: off, slowOp, all
+mongodb_profiling_mode: "slowOp"
+
+# Slow operation threshold in milliseconds
+mongodb_profiling_slow_op_threshold_ms: 100
+
+# Sample rate (0.0 to 1.0)
+mongodb_profiling_slow_op_sample_rate: 1.0
+
+# Log filter for slow operations
+mongodb_profiling_filter: {}
+
+# -----------------------------------------------------------------------------
+# Logging Configuration
+# -----------------------------------------------------------------------------
+
+# Log verbosity (0-5, higher = more verbose)
+mongodb_log_verbosity: 0
+
+# Component-specific verbosity
+mongodb_log_component_verbosity:
+  accessControl:
+    verbosity: 0
+  command:
+    verbosity: 0
+  control:
+    verbosity: 0
+  geo:
+    verbosity: 0
+  index:
+    verbosity: 0
+  network:
+    verbosity: 0
+  query:
+    verbosity: 0
+  replication:
+    verbosity: 0
+  sharding:
+    verbosity: 0
+  storage:
+    verbosity: 0
+  write:
+    verbosity: 0
+
+# Log destination (file, syslog)
+mongodb_log_destination: "file"
+
+# Log append mode
+mongodb_log_append: true
+
+# Log rotation
+mongodb_log_rotate: "rename"  # rename, reopen
+
+# Log timestamp format
+mongodb_log_timestamp_format: "iso8601-local"
+
+# Audit logging (Enterprise only)
+mongodb_audit_enabled: false
+mongodb_audit_destination: "file"
+mongodb_audit_format: "JSON"
+mongodb_audit_path: "/var/log/mongodb/audit.json"
+mongodb_audit_filter: "{}"
+
+# -----------------------------------------------------------------------------
+# System Resource Limits
+# -----------------------------------------------------------------------------
+
+# Configure system limits
+mongodb_configure_limits: true
+
+# File descriptor limit
+mongodb_limit_nofile: 64000
+
+# Process limit
+mongodb_limit_nproc: 64000
+
+# Memory lock limit
+mongodb_limit_memlock: "unlimited"
+
+# Stack size (KB)
+mongodb_limit_stack: 1024
+
+# Kernel parameters
+mongodb_configure_sysctl: true
+
+# Recommended kernel parameters
+mongodb_sysctl_params:
+  # Disable Transparent Huge Pages (handled separately)
+  # vm.nr_hugepages: 0
+  # Network settings
+  net.core.somaxconn: 65535
+  net.ipv4.tcp_max_syn_backlog: 65535
+  net.ipv4.tcp_keepalive_time: 120
+  net.ipv4.tcp_keepalive_intvl: 30
+  net.ipv4.tcp_keepalive_probes: 3
+  # VM settings
+  vm.swappiness: 1
+  vm.dirty_ratio: 15
+  vm.dirty_background_ratio: 5
+  vm.max_map_count: 262144
+  # File system
+  fs.file-max: 98000
+
+# Disable Transparent Huge Pages
+mongodb_disable_thp: true
+
+# NUMA settings
+mongodb_disable_numa: true
+
+# -----------------------------------------------------------------------------
+# SELinux Configuration
+# -----------------------------------------------------------------------------
+
+# Configure SELinux for MongoDB
+mongodb_configure_selinux: true
+
+# SELinux mode if MongoDB manages it (permissive, enforcing)
+mongodb_selinux_mode: "enforcing"
+
+# Custom SELinux port contexts
+mongodb_selinux_ports:
+  - "{{ mongodb_port }}"
+
+# -----------------------------------------------------------------------------
+# Firewall Configuration
+# -----------------------------------------------------------------------------
+
+# Configure firewall
+mongodb_configure_firewall: true
+
+# Firewall backend (firewalld, ufw, iptables)
+mongodb_firewall_backend: "auto"
+
+# Allowed source networks for MongoDB port
+mongodb_firewall_allowed_sources: []
+
+# Firewall zone (for firewalld)
+mongodb_firewall_zone: "public"
+
+# -----------------------------------------------------------------------------
+# Backup Configuration
+# -----------------------------------------------------------------------------
+
+# Enable automated backups
+mongodb_backup_enabled: false
+
+# Backup directory
+mongodb_backup_directory: "/var/backup/mongodb"
+
+# Backup retention days
+mongodb_backup_retention_days: 7
+
+# Backup schedule (cron format)
+mongodb_backup_schedule:
+  minute: "0"
+  hour: "2"
+  day: "*"
+  month: "*"
+  weekday: "*"
+
+# Backup method (mongodump, filesystem_snapshot)
+mongodb_backup_method: "mongodump"
+
+# Compression for backups
+mongodb_backup_compression: true
+
+# Backup to S3 (optional)
+mongodb_backup_s3_enabled: false
+mongodb_backup_s3_bucket: ""
+mongodb_backup_s3_prefix: "mongodb-backup"
+
+# -----------------------------------------------------------------------------
+# Monitoring Configuration
+# -----------------------------------------------------------------------------
+
+# Enable MongoDB Free Monitoring
+mongodb_free_monitoring_enabled: false
+
+# MongoDB Cloud Manager/Ops Manager settings
+mongodb_cloud_manager_enabled: false
+mongodb_cloud_manager_api_key: ""
+mongodb_cloud_manager_base_url: ""
+
+# Prometheus exporter settings
+mongodb_exporter_enabled: false
+mongodb_exporter_version: "0.40.0"
+mongodb_exporter_port: 9216
+mongodb_exporter_path: "/metrics"
+
+# -----------------------------------------------------------------------------
+# Health Check Configuration
+# -----------------------------------------------------------------------------
+
+# Health check settings
+mongodb_health_check_enabled: true
+
+# Replica set check interval (seconds)
+mongodb_health_check_interval: 30
+
+# Maximum replication lag threshold (seconds)
+mongodb_replication_lag_threshold: 60
+
+# Connection timeout for health checks (seconds)
+mongodb_health_check_timeout: 10
+
+# -----------------------------------------------------------------------------
+# Maintenance Configuration
+# -----------------------------------------------------------------------------
+
+# Enable automatic index creation
+mongodb_auto_index_creation: true
+
+# Enable automatic failover
+mongodb_auto_failover: true
+
+# Priority for this node during election (higher = more likely to be primary)
+mongodb_node_priority: 1
+
+# Hidden node configuration
+mongodb_node_hidden: false
+
+# Secondary delay (seconds) - for delayed replica members
+mongodb_node_slave_delay: 0
+
+# Build indexes on this node
+mongodb_node_build_indexes: true
+
+# Enable read operations on secondary
+mongodb_secondary_read_enabled: true
+
+# Maintenance mode (prevents this node from becoming primary)
+mongodb_maintenance_mode: false
+
+# -----------------------------------------------------------------------------
+# Performance Tuning
+# -----------------------------------------------------------------------------
+
+# Cursor timeout (milliseconds, 0 = no timeout)
+mongodb_cursor_timeout_ms: 600000
+
+# Query execution settings
+mongodb_query_settings:
+  # Maximum time for operations (milliseconds)
+  maxTimeMS: 30000
+  # Allow disk use for aggregation
+  allowDiskUse: true
+
+# Index build settings
+mongodb_index_build_settings:
+  # Build indexes in background
+  background: true
+  # Maximum memory for index builds (MB)
+  maxMemoryUsageMB: 500
+
+# -----------------------------------------------------------------------------
+# Rolling Upgrade Settings
+# -----------------------------------------------------------------------------
+
+# Enable rolling upgrade support
+mongodb_rolling_upgrade_enabled: false
+
+# Feature compatibility version (for upgrades)
+mongodb_feature_compatibility_version: ""
+
+# Wait time between node upgrades (seconds)
+mongodb_upgrade_wait_time: 60
+
+# -----------------------------------------------------------------------------
+# Custom Configuration
+# -----------------------------------------------------------------------------
+
+# Additional configuration options (will be merged into mongod.conf)
+mongodb_additional_config: {}
+
+# Custom environment variables for MongoDB service
+mongodb_environment_variables: {}
+
+# Pre/Post tasks hooks
+mongodb_pre_tasks: []
+mongodb_post_tasks: []
+
+# -----------------------------------------------------------------------------
+# Ansible Role Behavior
+# -----------------------------------------------------------------------------
+
+# Whether to initialize the replica set (only on primary node)
+mongodb_replicaset_init: true
+
+# Whether to reconfigure existing replica set
+mongodb_replicaset_reconfigure: true
+
+# Force reconfiguration even if members haven't changed
+mongodb_replicaset_force_reconfigure: false
+
+# Wait for replica set to be fully initialized
+mongodb_wait_for_replicaset: true
+
+# Maximum wait time for replica set initialization (seconds)
+mongodb_replicaset_init_timeout: 300
+
+# Whether to create users
+mongodb_create_users: true
+
+# Force user recreation
+mongodb_force_user_recreation: false
+
+# Gather MongoDB facts
+mongodb_gather_facts: true
+
+# Debug mode
+mongodb_debug_mode: false
+
+# Dry run mode (don't make changes)
+mongodb_dry_run: false

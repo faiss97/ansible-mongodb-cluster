@@ -1,0 +1,201 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Monitoring Configuration Tasks
+# =============================================================================
+# Configures MongoDB monitoring including Prometheus exporter and
+# Cloud Manager integration.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# MongoDB Prometheus Exporter
+# -----------------------------------------------------------------------------
+
+- name: Monitoring | Install MongoDB Exporter
+  block:
+    - name: Monitoring | Create exporter user
+      ansible.builtin.user:
+        name: mongodb_exporter
+        system: true
+        shell: /bin/false
+        create_home: false
+
+    - name: Monitoring | Download MongoDB exporter
+      ansible.builtin.get_url:
+        url: "https://github.com/percona/mongodb_exporter/releases/download/v{{ mongodb_exporter_version }}/mongodb_exporter-{{ mongodb_exporter_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/mongodb_exporter-{{ mongodb_exporter_version }}.tar.gz"
+        mode: "0644"
+      register: _exporter_download
+
+    - name: Monitoring | Extract MongoDB exporter
+      ansible.builtin.unarchive:
+        src: "/tmp/mongodb_exporter-{{ mongodb_exporter_version }}.tar.gz"
+        dest: /tmp
+        remote_src: true
+      when: _exporter_download.changed
+
+    - name: Monitoring | Install MongoDB exporter binary
+      ansible.builtin.copy:
+        src: "/tmp/mongodb_exporter-{{ mongodb_exporter_version }}.linux-amd64/mongodb_exporter"
+        dest: /usr/local/bin/mongodb_exporter
+        mode: "0755"
+        remote_src: true
+      notify: Restart mongodb_exporter
+
+    - name: Monitoring | Create exporter configuration directory
+      ansible.builtin.file:
+        path: /etc/mongodb_exporter
+        state: directory
+        owner: mongodb_exporter
+        group: mongodb_exporter
+        mode: "0750"
+
+    - name: Monitoring | Create exporter environment file
+      ansible.builtin.template:
+        src: mongodb_exporter.env.j2
+        dest: /etc/mongodb_exporter/mongodb_exporter.env
+        owner: mongodb_exporter
+        group: mongodb_exporter
+        mode: "0600"
+      notify: Restart mongodb_exporter
+
+    - name: Monitoring | Create exporter systemd service
+      ansible.builtin.template:
+        src: mongodb_exporter.service.j2
+        dest: /etc/systemd/system/mongodb_exporter.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart mongodb_exporter
+
+    - name: Monitoring | Enable and start MongoDB exporter
+      ansible.builtin.systemd:
+        name: mongodb_exporter
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Monitoring | Wait for exporter to start
+      ansible.builtin.wait_for:
+        port: "{{ mongodb_exporter_port }}"
+        host: localhost
+        delay: 3
+        timeout: 60
+
+    - name: Monitoring | Verify exporter metrics endpoint
+      ansible.builtin.uri:
+        url: "http://localhost:{{ mongodb_exporter_port }}{{ mongodb_exporter_path }}"
+        method: GET
+        return_content: true
+      register: _exporter_metrics
+      failed_when: false
+
+    - name: Monitoring | Display exporter status
+      ansible.builtin.debug:
+        msg: "MongoDB Exporter is running and serving metrics on port {{ mongodb_exporter_port }}"
+      when: _exporter_metrics.status == 200
+
+  when: mongodb_exporter_enabled
+  tags:
+    - mongodb-monitoring
+
+# -----------------------------------------------------------------------------
+# MongoDB Free Monitoring
+# -----------------------------------------------------------------------------
+
+- name: Monitoring | Configure MongoDB Free Monitoring
+  block:
+    - name: Monitoring | Enable Free Monitoring
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "db.enableFreeMonitoring()"
+        --quiet
+      register: _free_monitoring_enable
+      changed_when: "'ok' in _free_monitoring_enable.stdout"
+      failed_when: false
+      run_once: true
+
+    - name: Monitoring | Get Free Monitoring URL
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "db.getFreeMonitoringStatus().url"
+        --quiet
+      register: _free_monitoring_url
+      changed_when: false
+      failed_when: false
+      run_once: true
+
+    - name: Monitoring | Display Free Monitoring URL
+      ansible.builtin.debug:
+        msg: "MongoDB Free Monitoring URL: {{ _free_monitoring_url.stdout }}"
+      when: _free_monitoring_url.stdout | length > 0
+      run_once: true
+
+  when: mongodb_free_monitoring_enabled
+  tags:
+    - mongodb-monitoring
+
+# -----------------------------------------------------------------------------
+# MongoDB Cloud Manager / Ops Manager
+# -----------------------------------------------------------------------------
+
+- name: Monitoring | Configure Cloud Manager agent
+  block:
+    - name: Monitoring | Download Cloud Manager agent
+      ansible.builtin.get_url:
+        url: "{{ mongodb_cloud_manager_base_url }}/download/agent/automation/mongodb-mms-automation-agent-manager_latest_amd64.{{ 'deb' if ansible_os_family == 'Debian' else 'rpm' }}"
+        dest: "/tmp/mongodb-mms-agent.{{ 'deb' if ansible_os_family == 'Debian' else 'rpm' }}"
+        mode: "0644"
+
+    - name: Monitoring | Install Cloud Manager agent (Debian)
+      ansible.builtin.apt:
+        deb: /tmp/mongodb-mms-agent.deb
+      when: ansible_os_family == 'Debian'
+
+    - name: Monitoring | Install Cloud Manager agent (RedHat)
+      ansible.builtin.yum:
+        name: /tmp/mongodb-mms-agent.rpm
+        state: present
+        disable_gpg_check: true
+      when: ansible_os_family == 'RedHat'
+
+    - name: Monitoring | Configure Cloud Manager agent
+      ansible.builtin.lineinfile:
+        path: /etc/mongodb-mms/automation-agent.config
+        regexp: "^mmsApiKey="
+        line: "mmsApiKey={{ mongodb_cloud_manager_api_key }}"
+      notify: Restart mongodb-mms-automation-agent
+
+    - name: Monitoring | Configure Cloud Manager base URL
+      ansible.builtin.lineinfile:
+        path: /etc/mongodb-mms/automation-agent.config
+        regexp: "^mmsBaseUrl="
+        line: "mmsBaseUrl={{ mongodb_cloud_manager_base_url }}"
+      notify: Restart mongodb-mms-automation-agent
+
+    - name: Monitoring | Enable and start Cloud Manager agent
+      ansible.builtin.systemd:
+        name: mongodb-mms-automation-agent
+        enabled: true
+        state: started
+
+  when: mongodb_cloud_manager_enabled
+  tags:
+    - mongodb-monitoring
+
+# -----------------------------------------------------------------------------
+# Monitoring Summary
+# -----------------------------------------------------------------------------
+
+- name: Monitoring | Display monitoring configuration summary
+  ansible.builtin.debug:
+    msg: |
+      Monitoring Configuration Summary:
+      - Prometheus Exporter: {{ 'Enabled on port ' + mongodb_exporter_port | string if mongodb_exporter_enabled else 'Disabled' }}
+      - Free Monitoring: {{ 'Enabled' if mongodb_free_monitoring_enabled else 'Disabled' }}
+      - Cloud Manager: {{ 'Enabled' if mongodb_cloud_manager_enabled else 'Disabled' }}
+  tags:
+    - mongodb-monitoring

@@ -1,0 +1,281 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Sharding Configuration Tasks
+# =============================================================================
+# Configures MongoDB Sharded Cluster including config servers, shards, and
+# mongos routers.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Config Server Configuration
+# -----------------------------------------------------------------------------
+
+- name: Sharding | Configure config server replica set
+  block:
+    - name: Sharding | Check config server replica set status
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_config_port }}
+        --eval "rs.status().ok"
+        --quiet
+      register: _config_rs_status
+      changed_when: false
+      failed_when: false
+
+    - name: Sharding | Initialize config server replica set
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_config_port }}
+        --eval '
+          rs.initiate({
+            _id: "{{ mongodb_config_replicaset_name }}",
+            configsvr: true,
+            members: [
+              {% for server in mongodb_config_servers %}
+              { _id: {{ loop.index0 }}, host: "{{ server }}" }{% if not loop.last %},{% endif %}
+              {% endfor %}
+            ]
+          })
+        '
+        --quiet
+      when:
+        - _config_rs_status.rc != 0 or _config_rs_status.stdout != '1'
+      register: _config_rs_init
+      run_once: true
+
+    - name: Sharding | Wait for config server primary election
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_config_port }}
+        --eval "rs.status().members.filter(m => m.stateStr === 'PRIMARY').length"
+        --quiet
+      register: _config_primary_check
+      until: _config_primary_check.stdout | int >= 1
+      retries: "{{ _mongodb_rs_retries }}"
+      delay: "{{ _mongodb_rs_delay }}"
+      changed_when: false
+      run_once: true
+
+  when:
+    - mongodb_config_server
+    - mongodb_deployment_mode == 'sharded'
+  tags:
+    - mongodb-sharding
+
+# -----------------------------------------------------------------------------
+# Mongos Router Configuration
+# -----------------------------------------------------------------------------
+
+- name: Sharding | Configure mongos router
+  block:
+    - name: Sharding | Enable and start mongos service
+      ansible.builtin.systemd:
+        name: mongos
+        enabled: true
+        state: started
+        daemon_reload: true
+      register: _mongos_service
+
+    - name: Sharding | Wait for mongos to be ready
+      ansible.builtin.wait_for:
+        port: "{{ mongodb_mongos_port }}"
+        host: localhost
+        delay: 5
+        timeout: 120
+        state: started
+
+    - name: Sharding | Verify mongos connection
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_mongos_port }}
+        --eval "db.adminCommand('ping')"
+        --quiet
+      register: _mongos_ping
+      until: _mongos_ping.rc == 0
+      retries: "{{ _mongodb_connect_retries }}"
+      delay: "{{ _mongodb_connect_delay }}"
+      changed_when: false
+
+  when:
+    - mongodb_mongos_router
+    - mongodb_deployment_mode == 'sharded'
+  tags:
+    - mongodb-sharding
+
+# -----------------------------------------------------------------------------
+# Add Shards to Cluster
+# -----------------------------------------------------------------------------
+
+- name: Sharding | Add shards to cluster
+  block:
+    - name: Sharding | Get list of existing shards
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_mongos_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "JSON.stringify(db.adminCommand('listShards'))"
+        --quiet
+      register: _existing_shards
+      changed_when: false
+
+    - name: Sharding | Parse existing shards
+      ansible.builtin.set_fact:
+        _mongodb_existing_shard_ids: >-
+          {{ (_existing_shards.stdout | from_json).shards | map(attribute='_id') | list }}
+
+    - name: Sharding | Add new shards
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_mongos_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "sh.addShard('{{ item.members }}')"
+        --quiet
+      loop: "{{ mongodb_shards }}"
+      when: item.name not in _mongodb_existing_shard_ids
+      register: _add_shard_result
+
+    - name: Sharding | Display shard status
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_mongos_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "sh.status()"
+        --quiet
+      register: _shard_status
+      changed_when: false
+
+    - name: Sharding | Show shard status
+      ansible.builtin.debug:
+        msg: "{{ _shard_status.stdout }}"
+      when: mongodb_debug_mode
+
+  when:
+    - mongodb_mongos_router
+    - mongodb_deployment_mode == 'sharded'
+    - mongodb_shards | length > 0
+  run_once: true
+  delegate_to: "{{ groups[mongodb_mongos_group | default('mongos')][0] | default(inventory_hostname) }}"
+  tags:
+    - mongodb-sharding
+
+# -----------------------------------------------------------------------------
+# Enable Database Sharding
+# -----------------------------------------------------------------------------
+
+- name: Sharding | Enable sharding on databases
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_mongos_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval "sh.enableSharding('{{ item }}')"
+    --quiet
+  loop: "{{ mongodb_sharded_databases }}"
+  when:
+    - mongodb_mongos_router
+    - mongodb_deployment_mode == 'sharded'
+    - mongodb_sharded_databases | length > 0
+  run_once: true
+  delegate_to: "{{ groups[mongodb_mongos_group | default('mongos')][0] | default(inventory_hostname) }}"
+  register: _enable_sharding
+  failed_when: false
+  changed_when: "'ok' in _enable_sharding.stdout"
+  tags:
+    - mongodb-sharding
+
+# -----------------------------------------------------------------------------
+# Shard Collections
+# -----------------------------------------------------------------------------
+
+- name: Sharding | Shard collections
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_mongos_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval "sh.shardCollection('{{ item.database }}.{{ item.collection }}', {{ item.key | to_json }})"
+    --quiet
+  loop: "{{ mongodb_sharded_collections }}"
+  when:
+    - mongodb_mongos_router
+    - mongodb_deployment_mode == 'sharded'
+    - mongodb_sharded_collections | length > 0
+  run_once: true
+  delegate_to: "{{ groups[mongodb_mongos_group | default('mongos')][0] | default(inventory_hostname) }}"
+  register: _shard_collection
+  failed_when: false
+  changed_when: "'ok' in _shard_collection.stdout"
+  tags:
+    - mongodb-sharding
+
+# -----------------------------------------------------------------------------
+# Balancer Configuration
+# -----------------------------------------------------------------------------
+
+- name: Sharding | Configure balancer state
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_mongos_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval "sh.{{ 'startBalancer' if mongodb_balancer_state == 'started' else 'stopBalancer' }}()"
+    --quiet
+  when:
+    - mongodb_mongos_router
+    - mongodb_deployment_mode == 'sharded'
+  run_once: true
+  delegate_to: "{{ groups[mongodb_mongos_group | default('mongos')][0] | default(inventory_hostname) }}"
+  changed_when: false
+  tags:
+    - mongodb-sharding
+
+- name: Sharding | Configure balancer window
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_mongos_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval '
+      db.getSiblingDB("config").settings.update(
+        { _id: "balancer" },
+        { $set: {
+            activeWindow: {
+              start: "{{ mongodb_balancer_window.start }}",
+              stop: "{{ mongodb_balancer_window.stop }}"
+            }
+          }
+        },
+        { upsert: true }
+      )
+    '
+    --quiet
+  when:
+    - mongodb_mongos_router
+    - mongodb_deployment_mode == 'sharded'
+    - mongodb_balancer_window.enabled
+  run_once: true
+  delegate_to: "{{ groups[mongodb_mongos_group | default('mongos')][0] | default(inventory_hostname) }}"
+  changed_when: false
+  tags:
+    - mongodb-sharding
+
+# -----------------------------------------------------------------------------
+# Sharding Summary
+# -----------------------------------------------------------------------------
+
+- name: Sharding | Get final sharding status
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_mongos_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval "sh.status()"
+    --quiet
+  register: _final_shard_status
+  changed_when: false
+  when:
+    - mongodb_mongos_router
+    - mongodb_deployment_mode == 'sharded'
+  run_once: true
+  delegate_to: "{{ groups[mongodb_mongos_group | default('mongos')][0] | default(inventory_hostname) }}"
+  tags:
+    - mongodb-sharding
+
+- name: Sharding | Display sharding configuration summary
+  ansible.builtin.debug:
+    msg: |
+      Sharded Cluster Configuration Summary:
+      - Config Servers: {{ mongodb_config_servers | join(', ') }}
+      - Shards: {{ mongodb_shards | length }}
+      - Sharded Databases: {{ mongodb_sharded_databases | length }}
+      - Sharded Collections: {{ mongodb_sharded_collections | length }}
+      - Balancer: {{ mongodb_balancer_state }}
+  when:
+    - mongodb_mongos_router
+    - mongodb_deployment_mode == 'sharded'
+  run_once: true
+  tags:
+    - mongodb-sharding

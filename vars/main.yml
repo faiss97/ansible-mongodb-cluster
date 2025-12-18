@@ -1,0 +1,195 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Internal Variables
+# =============================================================================
+# These variables are used internally by the role and should not typically
+# be modified by users.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# OS Family Specific Variables (loaded dynamically)
+# -----------------------------------------------------------------------------
+
+# These are overridden by os-specific var files
+
+# Package manager
+_mongodb_pkg_mgr: "{{ ansible_pkg_mgr }}"
+
+# Service manager
+_mongodb_service_mgr: "{{ ansible_service_mgr }}"
+
+# -----------------------------------------------------------------------------
+# Derived Variables
+# -----------------------------------------------------------------------------
+
+# Full package names with version
+_mongodb_packages_with_version: >-
+  {{ mongodb_packages | map('regex_replace', '^(.*)$', '\1' + ('=' + mongodb_package_version if mongodb_package_version else '')) | list }}
+
+# Keyfile path for mongod.conf
+_mongodb_keyfile_configured: >-
+  {{ mongodb_security_auth_enabled and
+     mongodb_deployment_mode in ['replicaset', 'sharded'] }}
+
+# Primary node detection (used during initialization)
+_mongodb_is_primary_candidate: >-
+  {{ inventory_hostname == mongodb_replicaset_members[0].host.split(':')[0]
+     if mongodb_replicaset_members else
+     inventory_hostname == groups[mongodb_replicaset_group | default('mongodb')][0] }}
+
+# Connection string for admin operations
+_mongodb_admin_connection_string: >-
+  mongodb://{{ mongodb_admin_user }}:{{ mongodb_admin_password | urlencode }}@localhost:{{ mongodb_port }}/admin?authSource=admin
+
+# Replica set connection string
+_mongodb_replicaset_connection_string: >-
+  mongodb://{{ mongodb_admin_user }}:{{ mongodb_admin_password | urlencode }}@{{ mongodb_replicaset_members | map(attribute='host') | join(',') }}/admin?authSource=admin&replicaSet={{ mongodb_replicaset_name }}
+
+# Mongos connection string
+_mongodb_mongos_connection_string: >-
+  mongodb://{{ mongodb_admin_user }}:{{ mongodb_admin_password | urlencode }}@localhost:{{ mongodb_mongos_port }}/admin?authSource=admin
+
+# Config server connection string
+_mongodb_config_server_string: >-
+  {{ mongodb_config_replicaset_name }}/{{ mongodb_config_servers | join(',') }}
+
+# TLS connection options
+_mongodb_tls_options: >-
+  {{ '--tls --tlsCertificateKeyFile ' + mongodb_tls_certificate_key_file + ' --tlsCAFile ' + mongodb_tls_ca_file
+     if mongodb_tls_enabled else '' }}
+
+# Auth options for mongosh
+_mongodb_auth_options: >-
+  --username {{ mongodb_admin_user }} --password {{ mongodb_admin_password }} --authenticationDatabase admin
+
+# -----------------------------------------------------------------------------
+# Internal State Tracking
+# -----------------------------------------------------------------------------
+
+# State file for tracking initialization
+_mongodb_state_file: "/var/lib/mongo/.ansible_mongodb_state"
+
+# Replica set initialization state
+_mongodb_replicaset_initialized: false
+
+# Users creation state
+_mongodb_users_created: false
+
+# -----------------------------------------------------------------------------
+# Timeout and Retry Settings
+# -----------------------------------------------------------------------------
+
+# Connection retry settings
+_mongodb_connect_retries: 30
+_mongodb_connect_delay: 10
+
+# Replica set operation retries
+_mongodb_rs_retries: 60
+_mongodb_rs_delay: 5
+
+# User operation retries
+_mongodb_user_retries: 10
+_mongodb_user_delay: 3
+
+# Service operation retries
+_mongodb_service_retries: 30
+_mongodb_service_delay: 2
+
+# -----------------------------------------------------------------------------
+# Required Collections
+# -----------------------------------------------------------------------------
+
+# Ansible collections required by this role
+_mongodb_required_collections:
+  - community.mongodb
+  - ansible.posix
+  - community.general
+
+# Minimum MongoDB version supported
+_mongodb_minimum_version: "4.4"
+
+# Supported MongoDB versions
+_mongodb_supported_versions:
+  - "4.4"
+  - "5.0"
+  - "6.0"
+  - "7.0"
+  - "8.0"
+
+# -----------------------------------------------------------------------------
+# File Paths
+# -----------------------------------------------------------------------------
+
+# Systemd service file path
+_mongodb_systemd_service_file: "/etc/systemd/system/mongod.service.d/override.conf"
+
+# MongoDB shell command
+_mongodb_shell_cmd: "mongosh"
+
+# Legacy mongo shell fallback
+_mongodb_legacy_shell_cmd: "mongo"
+
+# Mongodump command
+_mongodb_mongodump_cmd: "mongodump"
+
+# Mongorestore command
+_mongodb_mongorestore_cmd: "mongorestore"
+
+# -----------------------------------------------------------------------------
+# Validation Patterns
+# -----------------------------------------------------------------------------
+
+# Valid deployment modes
+_mongodb_valid_deployment_modes:
+  - standalone
+  - replicaset
+  - sharded
+
+# Valid storage engines
+_mongodb_valid_storage_engines:
+  - wiredTiger
+  - inMemory
+
+# Valid TLS modes
+_mongodb_valid_tls_modes:
+  - disabled
+  - allowTLS
+  - preferTLS
+  - requireTLS
+
+# Valid log destinations
+_mongodb_valid_log_destinations:
+  - file
+  - syslog
+
+# Valid profiling modes
+_mongodb_valid_profiling_modes:
+  - "off"
+  - slowOp
+  - all
+
+# -----------------------------------------------------------------------------
+# Health Check Commands
+# -----------------------------------------------------------------------------
+
+# Commands used for health checks
+_mongodb_health_commands:
+  ping: "db.adminCommand('ping')"
+  rs_status: "rs.status()"
+  rs_config: "rs.conf()"
+  server_status: "db.serverStatus()"
+  repl_info: "db.getReplicationInfo()"
+  is_master: "db.isMaster()"
+  current_op: "db.currentOp()"
+
+# -----------------------------------------------------------------------------
+# Error Messages
+# -----------------------------------------------------------------------------
+
+_mongodb_error_messages:
+  auth_required: "Authentication is enabled but admin password is not set"
+  keyfile_required: "Keyfile is required for replica set authentication"
+  invalid_mode: "Invalid deployment mode specified"
+  version_unsupported: "MongoDB version is not supported"
+  members_required: "Replica set members must be defined"
+  tls_files_required: "TLS certificate files must be specified when TLS is enabled"

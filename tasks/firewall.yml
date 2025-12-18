@@ -1,0 +1,261 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Firewall Configuration Tasks
+# =============================================================================
+# Configures firewall rules for MongoDB using firewalld, ufw, or iptables.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Detect Firewall Backend
+# -----------------------------------------------------------------------------
+
+- name: Firewall | Detect active firewall
+  block:
+    - name: Firewall | Check for firewalld
+      ansible.builtin.command: systemctl is-active firewalld
+      register: _firewalld_status
+      changed_when: false
+      failed_when: false
+
+    - name: Firewall | Check for ufw
+      ansible.builtin.command: ufw status
+      register: _ufw_status
+      changed_when: false
+      failed_when: false
+
+    - name: Firewall | Set detected firewall backend
+      ansible.builtin.set_fact:
+        _mongodb_firewall_detected: >-
+          {{ 'firewalld' if _firewalld_status.rc == 0 else
+             ('ufw' if _ufw_status.rc == 0 and 'inactive' not in _ufw_status.stdout else
+              'none') }}
+
+    - name: Firewall | Display detected firewall
+      ansible.builtin.debug:
+        msg: "Detected firewall: {{ _mongodb_firewall_detected }}"
+      when: mongodb_debug_mode
+
+  when: mongodb_firewall_backend == 'auto'
+  tags:
+    - mongodb-firewall
+
+- name: Firewall | Set firewall backend
+  ansible.builtin.set_fact:
+    _mongodb_firewall_active: >-
+      {{ mongodb_firewall_backend if mongodb_firewall_backend != 'auto' else _mongodb_firewall_detected | default('none') }}
+  tags:
+    - mongodb-firewall
+
+# -----------------------------------------------------------------------------
+# Firewalld Configuration
+# -----------------------------------------------------------------------------
+
+- name: Firewall | Configure firewalld rules
+  block:
+    - name: Firewall | Ensure firewalld is running
+      ansible.builtin.systemd:
+        name: firewalld
+        state: started
+        enabled: true
+
+    - name: Firewall | Allow MongoDB port (firewalld)
+      ansible.posix.firewalld:
+        port: "{{ mongodb_port }}/tcp"
+        permanent: true
+        immediate: true
+        state: enabled
+        zone: "{{ mongodb_firewall_zone }}"
+
+    - name: Firewall | Allow MongoDB config server port (firewalld)
+      ansible.posix.firewalld:
+        port: "{{ mongodb_config_port }}/tcp"
+        permanent: true
+        immediate: true
+        state: enabled
+        zone: "{{ mongodb_firewall_zone }}"
+      when:
+        - mongodb_deployment_mode == 'sharded'
+        - mongodb_config_server
+
+    - name: Firewall | Allow mongos router port (firewalld)
+      ansible.posix.firewalld:
+        port: "{{ mongodb_mongos_port }}/tcp"
+        permanent: true
+        immediate: true
+        state: enabled
+        zone: "{{ mongodb_firewall_zone }}"
+      when:
+        - mongodb_deployment_mode == 'sharded'
+        - mongodb_mongos_router
+
+    - name: Firewall | Allow exporter port (firewalld)
+      ansible.posix.firewalld:
+        port: "{{ mongodb_exporter_port }}/tcp"
+        permanent: true
+        immediate: true
+        state: enabled
+        zone: "{{ mongodb_firewall_zone }}"
+      when: mongodb_exporter_enabled
+
+    - name: Firewall | Configure rich rules for source restrictions (firewalld)
+      ansible.posix.firewalld:
+        rich_rule: >-
+          rule family="ipv4" source address="{{ item }}"
+          port protocol="tcp" port="{{ mongodb_port }}" accept
+        permanent: true
+        immediate: true
+        state: enabled
+        zone: "{{ mongodb_firewall_zone }}"
+      loop: "{{ mongodb_firewall_allowed_sources }}"
+      when: mongodb_firewall_allowed_sources | length > 0
+
+  when: _mongodb_firewall_active == 'firewalld'
+  tags:
+    - mongodb-firewall
+
+# -----------------------------------------------------------------------------
+# UFW Configuration
+# -----------------------------------------------------------------------------
+
+- name: Firewall | Configure UFW rules
+  block:
+    - name: Firewall | Ensure UFW is enabled
+      community.general.ufw:
+        state: enabled
+
+    - name: Firewall | Allow MongoDB port (ufw)
+      community.general.ufw:
+        rule: allow
+        port: "{{ mongodb_port }}"
+        proto: tcp
+        comment: "MongoDB"
+
+    - name: Firewall | Allow MongoDB port from specific sources (ufw)
+      community.general.ufw:
+        rule: allow
+        port: "{{ mongodb_port }}"
+        proto: tcp
+        from_ip: "{{ item }}"
+        comment: "MongoDB from {{ item }}"
+      loop: "{{ mongodb_firewall_allowed_sources }}"
+      when: mongodb_firewall_allowed_sources | length > 0
+
+    - name: Firewall | Allow MongoDB config server port (ufw)
+      community.general.ufw:
+        rule: allow
+        port: "{{ mongodb_config_port }}"
+        proto: tcp
+        comment: "MongoDB Config Server"
+      when:
+        - mongodb_deployment_mode == 'sharded'
+        - mongodb_config_server
+
+    - name: Firewall | Allow mongos router port (ufw)
+      community.general.ufw:
+        rule: allow
+        port: "{{ mongodb_mongos_port }}"
+        proto: tcp
+        comment: "MongoDB Mongos Router"
+      when:
+        - mongodb_deployment_mode == 'sharded'
+        - mongodb_mongos_router
+
+    - name: Firewall | Allow exporter port (ufw)
+      community.general.ufw:
+        rule: allow
+        port: "{{ mongodb_exporter_port }}"
+        proto: tcp
+        comment: "MongoDB Exporter"
+      when: mongodb_exporter_enabled
+
+  when: _mongodb_firewall_active == 'ufw'
+  tags:
+    - mongodb-firewall
+
+# -----------------------------------------------------------------------------
+# Iptables Configuration (Fallback)
+# -----------------------------------------------------------------------------
+
+- name: Firewall | Configure iptables rules
+  block:
+    - name: Firewall | Allow MongoDB port (iptables)
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ mongodb_port }}"
+        jump: ACCEPT
+        comment: "MongoDB"
+      notify: Save iptables rules
+
+    - name: Firewall | Allow MongoDB port from specific sources (iptables)
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ mongodb_port }}"
+        source: "{{ item }}"
+        jump: ACCEPT
+        comment: "MongoDB from {{ item }}"
+      loop: "{{ mongodb_firewall_allowed_sources }}"
+      when: mongodb_firewall_allowed_sources | length > 0
+      notify: Save iptables rules
+
+    - name: Firewall | Allow MongoDB config server port (iptables)
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ mongodb_config_port }}"
+        jump: ACCEPT
+        comment: "MongoDB Config Server"
+      when:
+        - mongodb_deployment_mode == 'sharded'
+        - mongodb_config_server
+      notify: Save iptables rules
+
+    - name: Firewall | Allow mongos router port (iptables)
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ mongodb_mongos_port }}"
+        jump: ACCEPT
+        comment: "MongoDB Mongos Router"
+      when:
+        - mongodb_deployment_mode == 'sharded'
+        - mongodb_mongos_router
+      notify: Save iptables rules
+
+    - name: Firewall | Allow exporter port (iptables)
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ mongodb_exporter_port }}"
+        jump: ACCEPT
+        comment: "MongoDB Exporter"
+      when: mongodb_exporter_enabled
+      notify: Save iptables rules
+
+  when: _mongodb_firewall_active == 'iptables'
+  tags:
+    - mongodb-firewall
+
+# -----------------------------------------------------------------------------
+# Firewall Summary
+# -----------------------------------------------------------------------------
+
+- name: Firewall | Display firewall configuration summary
+  ansible.builtin.debug:
+    msg: |
+      Firewall Configuration Summary:
+      - Backend: {{ _mongodb_firewall_active }}
+      - MongoDB Port: {{ mongodb_port }}/tcp
+      {% if mongodb_deployment_mode == 'sharded' and mongodb_config_server %}
+      - Config Server Port: {{ mongodb_config_port }}/tcp
+      {% endif %}
+      {% if mongodb_deployment_mode == 'sharded' and mongodb_mongos_router %}
+      - Mongos Port: {{ mongodb_mongos_port }}/tcp
+      {% endif %}
+      {% if mongodb_exporter_enabled %}
+      - Exporter Port: {{ mongodb_exporter_port }}/tcp
+      {% endif %}
+      - Allowed Sources: {{ mongodb_firewall_allowed_sources | default(['any']) | join(', ') }}
+  tags:
+    - mongodb-firewall

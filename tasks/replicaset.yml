@@ -1,0 +1,267 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Replica Set Configuration Tasks
+# =============================================================================
+# Initializes and configures MongoDB Replica Set.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Pre-flight Checks
+# -----------------------------------------------------------------------------
+
+- name: ReplicaSet | Check if replica set is already initialized
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    --eval "rs.status().ok"
+    --quiet
+  register: _rs_status_check
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ _mongodb_primary_candidate }}"
+  tags:
+    - mongodb-replicaset
+
+- name: ReplicaSet | Set replica set initialization flag
+  ansible.builtin.set_fact:
+    _mongodb_rs_initialized: "{{ _rs_status_check.rc == 0 and _rs_status_check.stdout == '1' }}"
+  run_once: true
+  tags:
+    - mongodb-replicaset
+
+- name: ReplicaSet | Display replica set status
+  ansible.builtin.debug:
+    msg: "Replica set {{ mongodb_replicaset_name }} is {{ 'already initialized' if _mongodb_rs_initialized else 'not initialized' }}"
+  run_once: true
+  tags:
+    - mongodb-replicaset
+
+# -----------------------------------------------------------------------------
+# Determine Primary Candidate
+# -----------------------------------------------------------------------------
+
+- name: ReplicaSet | Set primary candidate for initialization
+  ansible.builtin.set_fact:
+    _mongodb_primary_candidate: >-
+      {{ mongodb_replicaset_members[0].host.split(':')[0]
+         if mongodb_replicaset_members | length > 0
+         else groups[mongodb_replicaset_group | default('mongodb')][0] }}
+  run_once: true
+  tags:
+    - mongodb-replicaset
+
+- name: ReplicaSet | Build members configuration
+  ansible.builtin.set_fact:
+    _mongodb_rs_members: >-
+      {{ mongodb_replicaset_members if mongodb_replicaset_members | length > 0 else
+         groups[mongodb_replicaset_group | default('mongodb')] |
+         map('extract', hostvars, ['ansible_default_ipv4', 'address']) |
+         zip_longest(range(0, 100), fillvalue='') |
+         map('reverse') | list |
+         map('list') |
+         map('community.general.dict_kv', '_id', 'host') | list }}
+  run_once: true
+  tags:
+    - mongodb-replicaset
+
+# -----------------------------------------------------------------------------
+# Initialize Replica Set
+# -----------------------------------------------------------------------------
+
+- name: ReplicaSet | Prepare replica set configuration
+  ansible.builtin.set_fact:
+    _mongodb_rs_config: |
+      {
+        _id: "{{ mongodb_replicaset_name }}",
+        members: [
+          {% for member in _mongodb_replicaset_members_computed | default(mongodb_replicaset_members) %}
+          {
+            _id: {{ loop.index0 }},
+            host: "{{ member.host | default(member + ':' + mongodb_port | string) }}",
+            priority: {{ member.priority | default(1) }},
+            votes: {{ member.votes | default(1) }}
+            {% if member.arbiterOnly | default(false) %}, arbiterOnly: true{% endif %}
+            {% if member.hidden | default(false) %}, hidden: true{% endif %}
+            {% if member.secondaryDelaySecs | default(0) > 0 %}, secondaryDelaySecs: {{ member.secondaryDelaySecs }}{% endif %}
+            {% if member.buildIndexes is defined and not member.buildIndexes %}, buildIndexes: false{% endif %}
+          }{% if not loop.last %},{% endif %}
+          {% endfor %}
+        ],
+        settings: {
+          chainingAllowed: {{ mongodb_replicaset_chaining_allowed | lower }},
+          heartbeatIntervalMillis: {{ mongodb_replicaset_settings.heartbeatIntervalMillis | default(2000) }},
+          electionTimeoutMillis: {{ mongodb_replicaset_settings.electionTimeoutMillis | default(10000) }},
+          catchUpTimeoutMillis: {{ mongodb_replicaset_settings.catchUpTimeoutMillis | default(-1) }}
+        }
+      }
+  run_once: true
+  delegate_to: "{{ _mongodb_primary_candidate }}"
+  tags:
+    - mongodb-replicaset
+
+- name: ReplicaSet | Initialize replica set
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    --eval 'rs.initiate({{ _mongodb_rs_config | replace("\n", " ") | replace("  ", " ") }})'
+    --quiet
+  register: _rs_init_result
+  when:
+    - not _mongodb_rs_initialized
+    - mongodb_replicaset_init
+    - inventory_hostname == _mongodb_primary_candidate
+  run_once: true
+  tags:
+    - mongodb-replicaset
+
+- name: ReplicaSet | Display initialization result
+  ansible.builtin.debug:
+    msg: "{{ _rs_init_result.stdout | default('Replica set already initialized') }}"
+  when:
+    - _rs_init_result is defined
+    - _rs_init_result.stdout is defined
+  run_once: true
+  tags:
+    - mongodb-replicaset
+
+# -----------------------------------------------------------------------------
+# Wait for Primary Election
+# -----------------------------------------------------------------------------
+
+- name: ReplicaSet | Wait for primary election
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    --eval "rs.status().members.filter(m => m.stateStr === 'PRIMARY').length"
+    --quiet
+  register: _rs_primary_check
+  until: _rs_primary_check.stdout | int >= 1
+  retries: "{{ _mongodb_rs_retries }}"
+  delay: "{{ _mongodb_rs_delay }}"
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ _mongodb_primary_candidate }}"
+  when: mongodb_wait_for_replicaset
+  tags:
+    - mongodb-replicaset
+
+- name: ReplicaSet | Get current primary
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    --eval "rs.status().members.find(m => m.stateStr === 'PRIMARY').name"
+    --quiet
+  register: _rs_current_primary
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ _mongodb_primary_candidate }}"
+  tags:
+    - mongodb-replicaset
+
+- name: ReplicaSet | Display current primary
+  ansible.builtin.debug:
+    msg: "Current primary: {{ _rs_current_primary.stdout }}"
+  run_once: true
+  tags:
+    - mongodb-replicaset
+
+# -----------------------------------------------------------------------------
+# Reconfigure Replica Set (if needed)
+# -----------------------------------------------------------------------------
+
+- name: ReplicaSet | Get current replica set configuration
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval "JSON.stringify(rs.conf())"
+    --quiet
+  register: _rs_current_config
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ _mongodb_primary_candidate }}"
+  when:
+    - _mongodb_rs_initialized
+    - mongodb_replicaset_reconfigure
+  tags:
+    - mongodb-replicaset
+
+- name: ReplicaSet | Check if reconfiguration is needed
+  ansible.builtin.set_fact:
+    _mongodb_rs_needs_reconfig: >-
+      {{ (_rs_current_config.stdout | from_json).members | length !=
+         (_mongodb_replicaset_members_computed | default(mongodb_replicaset_members) | length) }}
+  when:
+    - _mongodb_rs_initialized
+    - mongodb_replicaset_reconfigure
+    - _rs_current_config.rc == 0
+  run_once: true
+  tags:
+    - mongodb-replicaset
+
+# -----------------------------------------------------------------------------
+# Add Arbiter (if configured)
+# -----------------------------------------------------------------------------
+
+- name: ReplicaSet | Add arbiter node
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval "rs.addArb('{{ mongodb_arbiter_host }}')"
+    --quiet
+  register: _rs_add_arbiter
+  when:
+    - mongodb_arbiter_enabled
+    - mongodb_arbiter_host | length > 0
+    - _mongodb_rs_initialized
+    - inventory_hostname == _rs_current_primary.stdout.split(':')[0]
+  run_once: true
+  changed_when: "'ok' in _rs_add_arbiter.stdout"
+  failed_when: false
+  tags:
+    - mongodb-replicaset
+
+# -----------------------------------------------------------------------------
+# Wait for Replica Set Synchronization
+# -----------------------------------------------------------------------------
+
+- name: ReplicaSet | Wait for all members to be in healthy state
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    --eval "rs.status().members.every(m => ['PRIMARY', 'SECONDARY', 'ARBITER'].includes(m.stateStr))"
+    --quiet
+  register: _rs_health_check
+  until: _rs_health_check.stdout == 'true'
+  retries: "{{ _mongodb_rs_retries }}"
+  delay: "{{ _mongodb_rs_delay }}"
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ _mongodb_primary_candidate }}"
+  when: mongodb_wait_for_replicaset
+  tags:
+    - mongodb-replicaset
+
+# -----------------------------------------------------------------------------
+# Replica Set Status Summary
+# -----------------------------------------------------------------------------
+
+- name: ReplicaSet | Get final replica set status
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    --eval "JSON.stringify(rs.status(), null, 2)"
+    --quiet
+  register: _rs_final_status
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ _mongodb_primary_candidate }}"
+  tags:
+    - mongodb-replicaset
+
+- name: ReplicaSet | Display replica set summary
+  ansible.builtin.debug:
+    msg: |
+      Replica Set Configuration Complete:
+      - Name: {{ mongodb_replicaset_name }}
+      - Primary: {{ _rs_current_primary.stdout }}
+      - Members: {{ (_rs_final_status.stdout | from_json).members | length }}
+      - Status: {{ (_rs_final_status.stdout | from_json).ok }}
+  run_once: true
+  tags:
+    - mongodb-replicaset

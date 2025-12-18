@@ -1,0 +1,373 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - System Configuration Tasks
+# =============================================================================
+# Configures system prerequisites including limits, sysctl, THP, and SELinux.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# System Information Gathering
+# -----------------------------------------------------------------------------
+
+- name: System | Gather system facts
+  ansible.builtin.setup:
+    filter:
+      - ansible_memtotal_mb
+      - ansible_processor_vcpus
+      - ansible_distribution*
+      - ansible_os_family
+      - ansible_pkg_mgr
+      - ansible_service_mgr
+  tags:
+    - mongodb-system
+
+- name: System | Display system information
+  ansible.builtin.debug:
+    msg: |
+      System Information:
+      - Distribution: {{ ansible_distribution }} {{ ansible_distribution_version }}
+      - OS Family: {{ ansible_os_family }}
+      - Memory: {{ ansible_memtotal_mb }} MB
+      - CPUs: {{ ansible_processor_vcpus }}
+      - Package Manager: {{ ansible_pkg_mgr }}
+  when: mongodb_debug_mode
+  tags:
+    - mongodb-system
+
+# -----------------------------------------------------------------------------
+# System Limits Configuration
+# -----------------------------------------------------------------------------
+
+- name: System | Create limits.d directory
+  ansible.builtin.file:
+    path: /etc/security/limits.d
+    state: directory
+    mode: "0755"
+  when: mongodb_configure_limits
+  tags:
+    - mongodb-system
+
+- name: System | Configure system limits for MongoDB
+  ansible.builtin.template:
+    src: limits.conf.j2
+    dest: "{{ _mongodb_limits_conf_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: mongodb_configure_limits
+  tags:
+    - mongodb-system
+
+- name: System | Configure PAM to use limits
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/common-session
+    line: "session required pam_limits.so"
+    create: true
+    mode: "0644"
+  when:
+    - mongodb_configure_limits
+    - ansible_os_family == 'Debian'
+  tags:
+    - mongodb-system
+
+- name: System | Configure PAM session for limits (RHEL)
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/system-auth
+    line: "session required pam_limits.so"
+    insertafter: "session.*required.*pam_unix.so"
+  when:
+    - mongodb_configure_limits
+    - ansible_os_family == 'RedHat'
+  failed_when: false
+  tags:
+    - mongodb-system
+
+# -----------------------------------------------------------------------------
+# Sysctl Configuration
+# -----------------------------------------------------------------------------
+
+- name: System | Configure sysctl parameters
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-mongodb.conf
+    reload: true
+    state: present
+  loop: "{{ mongodb_sysctl_params | dict2items }}"
+  when: mongodb_configure_sysctl
+  tags:
+    - mongodb-system
+
+# -----------------------------------------------------------------------------
+# Transparent Huge Pages (THP) Disable
+# -----------------------------------------------------------------------------
+
+- name: System | Create THP disable service
+  ansible.builtin.template:
+    src: disable-thp.service.j2
+    dest: /etc/systemd/system/disable-transparent-hugepages.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: mongodb_disable_thp
+  notify:
+    - Reload systemd
+  tags:
+    - mongodb-system
+
+- name: System | Enable and start THP disable service
+  ansible.builtin.systemd:
+    name: disable-transparent-hugepages
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: mongodb_disable_thp
+  tags:
+    - mongodb-system
+
+- name: System | Verify THP is disabled
+  ansible.builtin.shell: |
+    cat /sys/kernel/mm/transparent_hugepage/enabled
+  register: _thp_status
+  changed_when: false
+  failed_when: false
+  when: mongodb_disable_thp
+  tags:
+    - mongodb-system
+
+- name: System | Display THP status
+  ansible.builtin.debug:
+    msg: "THP Status: {{ _thp_status.stdout | default('unknown') }}"
+  when:
+    - mongodb_disable_thp
+    - mongodb_debug_mode
+  tags:
+    - mongodb-system
+
+# -----------------------------------------------------------------------------
+# NUMA Configuration
+# -----------------------------------------------------------------------------
+
+- name: System | Check NUMA availability
+  ansible.builtin.stat:
+    path: /sys/devices/system/node/node1
+  register: _numa_check
+  tags:
+    - mongodb-system
+
+- name: System | Install numactl package
+  ansible.builtin.package:
+    name: numactl
+    state: present
+  when:
+    - mongodb_disable_numa
+    - _numa_check.stat.exists
+  tags:
+    - mongodb-system
+
+# -----------------------------------------------------------------------------
+# SELinux Configuration (RHEL-based systems)
+# -----------------------------------------------------------------------------
+
+- name: System | Check SELinux status
+  ansible.builtin.command: getenforce
+  register: _selinux_status
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'RedHat'
+    - mongodb_configure_selinux
+  tags:
+    - mongodb-system
+
+- name: System | Install SELinux management packages
+  ansible.builtin.package:
+    name: "{{ _mongodb_selinux_packages }}"
+    state: present
+  when:
+    - ansible_os_family == 'RedHat'
+    - mongodb_configure_selinux
+    - _selinux_status.rc == 0
+    - _selinux_status.stdout != 'Disabled'
+  tags:
+    - mongodb-system
+
+- name: System | Configure SELinux port for MongoDB
+  community.general.seport:
+    ports: "{{ item }}"
+    proto: tcp
+    setype: mongod_port_t
+    state: present
+  loop: "{{ mongodb_selinux_ports }}"
+  when:
+    - ansible_os_family == 'RedHat'
+    - mongodb_configure_selinux
+    - _selinux_status.rc == 0
+    - _selinux_status.stdout != 'Disabled'
+  tags:
+    - mongodb-system
+
+- name: System | Configure SELinux boolean for MongoDB network connections
+  ansible.posix.seboolean:
+    name: "{{ item }}"
+    state: true
+    persistent: true
+  loop:
+    - mongod_can_network_connect
+  when:
+    - ansible_os_family == 'RedHat'
+    - mongodb_configure_selinux
+    - _selinux_status.rc == 0
+    - _selinux_status.stdout != 'Disabled'
+  failed_when: false
+  tags:
+    - mongodb-system
+
+- name: System | Create SELinux policy for custom data directory
+  block:
+    - name: System | Check if custom data directory context needs update
+      ansible.builtin.command: >
+        semanage fcontext -l | grep -q "{{ mongodb_data_directory }}"
+      register: _selinux_context_check
+      changed_when: false
+      failed_when: false
+
+    - name: System | Add SELinux context for custom data directory
+      ansible.builtin.command: >
+        semanage fcontext -a -t mongod_var_lib_t "{{ mongodb_data_directory }}(/.*)?"
+      when: _selinux_context_check.rc != 0
+
+    - name: System | Apply SELinux context to data directory
+      ansible.builtin.command: >
+        restorecon -Rv {{ mongodb_data_directory }}
+      when: _selinux_context_check.rc != 0
+  when:
+    - ansible_os_family == 'RedHat'
+    - mongodb_configure_selinux
+    - _selinux_status.rc == 0
+    - _selinux_status.stdout != 'Disabled'
+    - mongodb_data_directory != '/var/lib/mongo'
+  tags:
+    - mongodb-system
+
+# -----------------------------------------------------------------------------
+# Directory Creation
+# -----------------------------------------------------------------------------
+
+- name: System | Create MongoDB data directory
+  ansible.builtin.file:
+    path: "{{ mongodb_data_directory }}"
+    state: directory
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0755"
+  tags:
+    - mongodb-system
+
+- name: System | Create MongoDB log directory
+  ansible.builtin.file:
+    path: "{{ mongodb_log_directory }}"
+    state: directory
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0755"
+  tags:
+    - mongodb-system
+
+- name: System | Create MongoDB PID directory
+  ansible.builtin.file:
+    path: "{{ mongodb_pid_directory }}"
+    state: directory
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0755"
+  tags:
+    - mongodb-system
+
+- name: System | Create MongoDB config directory
+  ansible.builtin.file:
+    path: "{{ mongodb_config_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - mongodb-system
+
+# -----------------------------------------------------------------------------
+# Systemd Override Configuration
+# -----------------------------------------------------------------------------
+
+- name: System | Create systemd override directory
+  ansible.builtin.file:
+    path: "{{ _mongodb_systemd_override_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - mongodb-system
+
+- name: System | Configure systemd override for MongoDB
+  ansible.builtin.template:
+    src: mongod.service.override.j2
+    dest: "{{ _mongodb_systemd_override_dir }}/override.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart mongod
+  tags:
+    - mongodb-system
+
+# -----------------------------------------------------------------------------
+# Logrotate Configuration
+# -----------------------------------------------------------------------------
+
+- name: System | Configure logrotate for MongoDB
+  ansible.builtin.template:
+    src: logrotate.j2
+    dest: "{{ _mongodb_logrotate_conf }}"
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-system
+
+# -----------------------------------------------------------------------------
+# Host Resolution
+# -----------------------------------------------------------------------------
+
+- name: System | Ensure hostname is resolvable
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ ansible_default_ipv4.address | default('127.0.0.1') }} {{ ansible_hostname }} {{ ansible_fqdn }}"
+    state: present
+    create: true
+    mode: "0644"
+  when: mongodb_deployment_mode in ['replicaset', 'sharded']
+  tags:
+    - mongodb-system
+
+# -----------------------------------------------------------------------------
+# Time Synchronization Check
+# -----------------------------------------------------------------------------
+
+- name: System | Check if NTP or chronyd is running
+  ansible.builtin.shell: |
+    systemctl is-active chronyd || systemctl is-active ntpd || systemctl is-active systemd-timesyncd
+  register: _time_sync_status
+  changed_when: false
+  failed_when: false
+  tags:
+    - mongodb-system
+
+- name: System | Warn if time synchronization is not configured
+  ansible.builtin.debug:
+    msg: "WARNING: No time synchronization service is active. MongoDB replica sets require synchronized clocks!"
+  when:
+    - mongodb_deployment_mode in ['replicaset', 'sharded']
+    - _time_sync_status.rc != 0
+  tags:
+    - mongodb-system

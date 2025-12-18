@@ -1,0 +1,35 @@
+---
+# =============================================================================
+# MongoDB Minimal Deployment Playbook
+# =============================================================================
+# Minimal playbook for quick MongoDB deployment.
+# Use for development or testing environments.
+# =============================================================================
+
+- name: Deploy MongoDB
+  hosts: mongodb
+  become: true
+
+  vars:
+    # Basic settings
+    mongodb_version: "7.0"
+    mongodb_deployment_mode: "replicaset"
+    mongodb_replicaset_name: "rs0"
+
+    # Security - CHANGE THESE IN PRODUCTION!
+    mongodb_security_auth_enabled: true
+    mongodb_admin_user: "admin"
+    mongodb_admin_password: "ChangeMe123!"
+    mongodb_cluster_admin_user: "clusterAdmin"
+    mongodb_cluster_admin_password: "ChangeMe123!"
+
+  roles:
+    - ansible-mongodb-cluster
+
+  post_tasks:
+    - name: Display connection string
+      ansible.builtin.debug:
+        msg: |
+          MongoDB deployed successfully!
+          Connection string: mongodb://{{ mongodb_admin_user }}:****@{{ ansible_host }}:{{ mongodb_port }}/admin
+      run_once: true

@@ -1,0 +1,221 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Main Tasks
+# =============================================================================
+# This is the main entry point for the MongoDB role.
+# Tasks are organized into separate files for modularity and maintainability.
+# =============================================================================
+
+- name: Display role banner
+  ansible.builtin.debug:
+    msg: |
+      ╔══════════════════════════════════════════════════════════════════════╗
+      ║            Ansible MongoDB Cluster Role                              ║
+      ║            Deployment Mode: {{ mongodb_deployment_mode | upper }}
+      ║            Version: {{ mongodb_version }}
+      ╚══════════════════════════════════════════════════════════════════════╝
+  tags:
+    - always
+    - mongodb
+
+# -----------------------------------------------------------------------------
+# Pre-flight Checks and Variable Loading
+# -----------------------------------------------------------------------------
+
+- name: Include OS-specific variables
+  ansible.builtin.include_vars: "{{ item }}"
+  with_first_found:
+    - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+    - "{{ ansible_distribution }}.yml"
+    - "{{ ansible_os_family }}.yml"
+    - "default.yml"
+  tags:
+    - always
+    - mongodb
+    - mongodb-vars
+
+- name: Validate role configuration
+  ansible.builtin.include_tasks: validate.yml
+  tags:
+    - always
+    - mongodb
+    - mongodb-validate
+
+# -----------------------------------------------------------------------------
+# Pre-tasks (hooks)
+# -----------------------------------------------------------------------------
+
+- name: Run pre-tasks hooks
+  ansible.builtin.include_tasks: "{{ item }}"
+  loop: "{{ mongodb_pre_tasks }}"
+  when: mongodb_pre_tasks | length > 0
+  tags:
+    - mongodb
+    - mongodb-hooks
+
+# -----------------------------------------------------------------------------
+# System Preparation
+# -----------------------------------------------------------------------------
+
+- name: Configure system prerequisites
+  ansible.builtin.include_tasks: system.yml
+  tags:
+    - mongodb
+    - mongodb-system
+
+# -----------------------------------------------------------------------------
+# MongoDB Installation
+# -----------------------------------------------------------------------------
+
+- name: Install MongoDB packages
+  ansible.builtin.include_tasks: install.yml
+  tags:
+    - mongodb
+    - mongodb-install
+
+# -----------------------------------------------------------------------------
+# Security Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure security (keyfile, TLS)
+  ansible.builtin.include_tasks: security.yml
+  when: mongodb_security_auth_enabled
+  tags:
+    - mongodb
+    - mongodb-security
+
+# -----------------------------------------------------------------------------
+# MongoDB Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure MongoDB
+  ansible.builtin.include_tasks: configure.yml
+  tags:
+    - mongodb
+    - mongodb-configure
+
+# -----------------------------------------------------------------------------
+# Service Management
+# -----------------------------------------------------------------------------
+
+- name: Manage MongoDB service
+  ansible.builtin.include_tasks: service.yml
+  tags:
+    - mongodb
+    - mongodb-service
+
+# -----------------------------------------------------------------------------
+# Replica Set Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure replica set
+  ansible.builtin.include_tasks: replicaset.yml
+  when: mongodb_deployment_mode == 'replicaset'
+  tags:
+    - mongodb
+    - mongodb-replicaset
+
+# -----------------------------------------------------------------------------
+# Sharded Cluster Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure sharded cluster
+  ansible.builtin.include_tasks: sharding.yml
+  when: mongodb_deployment_mode == 'sharded'
+  tags:
+    - mongodb
+    - mongodb-sharding
+
+# -----------------------------------------------------------------------------
+# User Management
+# -----------------------------------------------------------------------------
+
+- name: Configure MongoDB users
+  ansible.builtin.include_tasks: users.yml
+  when: mongodb_create_users
+  tags:
+    - mongodb
+    - mongodb-users
+
+# -----------------------------------------------------------------------------
+# Firewall Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure firewall rules
+  ansible.builtin.include_tasks: firewall.yml
+  when: mongodb_configure_firewall
+  tags:
+    - mongodb
+    - mongodb-firewall
+
+# -----------------------------------------------------------------------------
+# Backup Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure automated backups
+  ansible.builtin.include_tasks: backup.yml
+  when: mongodb_backup_enabled
+  tags:
+    - mongodb
+    - mongodb-backup
+
+# -----------------------------------------------------------------------------
+# Monitoring Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure monitoring
+  ansible.builtin.include_tasks: monitoring.yml
+  when: mongodb_exporter_enabled or mongodb_cloud_manager_enabled
+  tags:
+    - mongodb
+    - mongodb-monitoring
+
+# -----------------------------------------------------------------------------
+# Health Checks
+# -----------------------------------------------------------------------------
+
+- name: Run health checks
+  ansible.builtin.include_tasks: healthcheck.yml
+  when: mongodb_health_check_enabled
+  tags:
+    - mongodb
+    - mongodb-healthcheck
+
+# -----------------------------------------------------------------------------
+# Post-tasks (hooks)
+# -----------------------------------------------------------------------------
+
+- name: Run post-tasks hooks
+  ansible.builtin.include_tasks: "{{ item }}"
+  loop: "{{ mongodb_post_tasks }}"
+  when: mongodb_post_tasks | length > 0
+  tags:
+    - mongodb
+    - mongodb-hooks
+
+# -----------------------------------------------------------------------------
+# Final Summary
+# -----------------------------------------------------------------------------
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+      MongoDB Deployment Summary
+      ═══════════════════════════════════════════════════════════════════════
+      Hostname:          {{ inventory_hostname }}
+      Deployment Mode:   {{ mongodb_deployment_mode }}
+      MongoDB Version:   {{ mongodb_version }}
+      Port:              {{ mongodb_port }}
+      Data Directory:    {{ mongodb_data_directory }}
+      Auth Enabled:      {{ mongodb_security_auth_enabled }}
+      {% if mongodb_deployment_mode == 'replicaset' %}
+      Replica Set:       {{ mongodb_replicaset_name }}
+      {% endif %}
+      {% if mongodb_deployment_mode == 'sharded' %}
+      Sharding:          Enabled
+      {% endif %}
+      ═══════════════════════════════════════════════════════════════════════
+  tags:
+    - always
+    - mongodb

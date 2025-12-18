@@ -1,0 +1,194 @@
+---
+# =============================================================================
+# MongoDB Group Variables - Production Configuration
+# =============================================================================
+# This file contains all production-ready configurations for MongoDB.
+# Sensitive values should be stored in vault.yml.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# MongoDB Version and Installation
+# -----------------------------------------------------------------------------
+
+mongodb_version: "7.0"
+mongodb_version_pinned: true
+
+# -----------------------------------------------------------------------------
+# Deployment Configuration
+# -----------------------------------------------------------------------------
+
+mongodb_deployment_mode: "replicaset"
+mongodb_replicaset_name: "rs0"
+
+# Replica set members - override in inventory or host_vars
+mongodb_replicaset_members: []
+
+# -----------------------------------------------------------------------------
+# Network Configuration
+# -----------------------------------------------------------------------------
+
+mongodb_port: 27017
+mongodb_bind_ip: "127.0.0.1,{{ ansible_default_ipv4.address }}"
+mongodb_max_connections: 65536
+
+# -----------------------------------------------------------------------------
+# Security Configuration
+# -----------------------------------------------------------------------------
+
+mongodb_security_auth_enabled: true
+mongodb_security_authorization: "enabled"
+
+# Admin user (password in vault.yml)
+mongodb_admin_user: "admin"
+
+# Cluster admin (password in vault.yml)
+mongodb_cluster_admin_user: "clusterAdmin"
+
+# Backup user
+mongodb_create_backup_user: true
+mongodb_backup_user: "backup"
+
+# Monitoring user
+mongodb_create_monitoring_user: true
+mongodb_monitoring_user: "monitoring"
+
+# TLS/SSL (enable in production)
+mongodb_tls_enabled: false
+# mongodb_tls_mode: "requireTLS"
+# mongodb_tls_certificate_key_file: "/etc/mongodb/tls/mongodb.pem"
+# mongodb_tls_ca_file: "/etc/mongodb/tls/ca.crt"
+
+# -----------------------------------------------------------------------------
+# Storage Configuration
+# -----------------------------------------------------------------------------
+
+mongodb_data_directory: "/var/lib/mongo"
+mongodb_storage_engine: "wiredTiger"
+mongodb_storage_journal_enabled: true
+mongodb_storage_directory_per_db: true
+
+# WiredTiger settings
+mongodb_wiredtiger_cache_size_gb: ""  # Auto-calculated
+mongodb_wiredtiger_collection_block_compressor: "snappy"
+mongodb_wiredtiger_journal_compressor: "snappy"
+
+# Oplog size (2GB default)
+mongodb_oplog_size_mb: 2048
+
+# -----------------------------------------------------------------------------
+# Performance Tuning
+# -----------------------------------------------------------------------------
+
+mongodb_profiling_mode: "slowOp"
+mongodb_profiling_slow_op_threshold_ms: 100
+
+# WiredTiger concurrent transactions
+mongodb_wiredtiger_concurrent_read_transactions: 128
+mongodb_wiredtiger_concurrent_write_transactions: 128
+
+# -----------------------------------------------------------------------------
+# System Configuration
+# -----------------------------------------------------------------------------
+
+mongodb_configure_limits: true
+mongodb_limit_nofile: 64000
+mongodb_limit_nproc: 64000
+mongodb_limit_memlock: "unlimited"
+
+mongodb_configure_sysctl: true
+mongodb_disable_thp: true
+mongodb_disable_numa: true
+
+# SELinux (RHEL-based systems)
+mongodb_configure_selinux: true
+
+# -----------------------------------------------------------------------------
+# Firewall Configuration
+# -----------------------------------------------------------------------------
+
+mongodb_configure_firewall: true
+mongodb_firewall_backend: "auto"
+mongodb_firewall_zone: "public"
+
+# Restrict access to specific networks
+mongodb_firewall_allowed_sources:
+  - "192.168.1.0/24"
+  - "10.0.0.0/8"
+
+# -----------------------------------------------------------------------------
+# Backup Configuration
+# -----------------------------------------------------------------------------
+
+mongodb_backup_enabled: true
+mongodb_backup_directory: "/var/backup/mongodb"
+mongodb_backup_retention_days: 7
+mongodb_backup_compression: true
+
+mongodb_backup_schedule:
+  minute: "0"
+  hour: "2"
+  day: "*"
+  month: "*"
+  weekday: "*"
+
+# S3 backup (optional)
+mongodb_backup_s3_enabled: false
+# mongodb_backup_s3_bucket: "my-mongodb-backups"
+# mongodb_backup_s3_prefix: "production"
+
+# -----------------------------------------------------------------------------
+# Monitoring Configuration
+# -----------------------------------------------------------------------------
+
+mongodb_exporter_enabled: true
+mongodb_exporter_version: "0.40.0"
+mongodb_exporter_port: 9216
+
+mongodb_free_monitoring_enabled: false
+
+# -----------------------------------------------------------------------------
+# Health Check Configuration
+# -----------------------------------------------------------------------------
+
+mongodb_health_check_enabled: true
+mongodb_replication_lag_threshold: 60
+
+# -----------------------------------------------------------------------------
+# Application Users
+# -----------------------------------------------------------------------------
+
+# Example application users (passwords in vault.yml)
+mongodb_users:
+  - name: "appuser"
+    password: "{{ vault_mongodb_appuser_password }}"
+    database: "myapp"
+    roles:
+      - role: "readWrite"
+        db: "myapp"
+  - name: "readonly"
+    password: "{{ vault_mongodb_readonly_password }}"
+    database: "myapp"
+    roles:
+      - role: "read"
+        db: "myapp"
+
+# Databases to create for applications
+mongodb_application_databases:
+  - myapp
+  - analytics
+
+# -----------------------------------------------------------------------------
+# Logging Configuration
+# -----------------------------------------------------------------------------
+
+mongodb_log_destination: "file"
+mongodb_log_directory: "/var/log/mongodb"
+mongodb_log_verbosity: 0
+mongodb_log_append: true
+mongodb_log_rotate: "reopen"
+
+# -----------------------------------------------------------------------------
+# Debug Mode
+# -----------------------------------------------------------------------------
+
+mongodb_debug_mode: false

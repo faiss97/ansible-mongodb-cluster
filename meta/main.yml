@@ -1,0 +1,68 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Role Metadata
+# =============================================================================
+
+galaxy_info:
+  role_name: ansible_mongodb_cluster
+  author: DevOps Team
+  description: |
+    Production-ready Ansible role for deploying and managing MongoDB clusters.
+    Supports standalone, replica set, and sharded cluster deployments with
+    full security, backup, monitoring, and high availability configurations.
+
+  company: ""
+
+  license: MIT
+
+  min_ansible_version: "2.12"
+
+  platforms:
+    - name: Debian
+      versions:
+        - bullseye
+        - bookworm
+    - name: Ubuntu
+      versions:
+        - focal
+        - jammy
+        - noble
+    - name: EL
+      versions:
+        - "8"
+        - "9"
+    - name: Rocky
+      versions:
+        - "8"
+        - "9"
+    - name: AlmaLinux
+      versions:
+        - "8"
+        - "9"
+
+  galaxy_tags:
+    - mongodb
+    - database
+    - nosql
+    - replicaset
+    - sharding
+    - cluster
+    - backup
+    - monitoring
+    - security
+    - high_availability
+    - production
+
+  issue_tracker_url: ""
+  documentation_url: ""
+
+# Dependencies
+dependencies:
+  - role: ansible.posix
+    when: false  # Collection dependency, not role
+
+# Collections required
+collections:
+  - community.mongodb
+  - ansible.posix
+  - community.general

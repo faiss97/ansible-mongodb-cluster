@@ -1,0 +1,194 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Handlers
+# =============================================================================
+# Handlers for MongoDB role - triggered by notify directives.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Systemd Handlers
+# -----------------------------------------------------------------------------
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: "Reload systemd"
+
+# -----------------------------------------------------------------------------
+# MongoDB Service Handlers
+# -----------------------------------------------------------------------------
+
+- name: Restart mongod
+  ansible.builtin.systemd:
+    name: "{{ mongodb_service_name }}"
+    state: restarted
+  listen: "Restart mongod"
+  when: mongodb_service_state == 'started'
+
+- name: Stop mongod
+  ansible.builtin.systemd:
+    name: "{{ mongodb_service_name }}"
+    state: stopped
+  listen: "Stop mongod"
+
+- name: Start mongod
+  ansible.builtin.systemd:
+    name: "{{ mongodb_service_name }}"
+    state: started
+  listen: "Start mongod"
+
+- name: Reload mongod
+  ansible.builtin.systemd:
+    name: "{{ mongodb_service_name }}"
+    state: reloaded
+  listen: "Reload mongod"
+
+# -----------------------------------------------------------------------------
+# Mongos Service Handlers (Sharded Cluster)
+# -----------------------------------------------------------------------------
+
+- name: Restart mongos
+  ansible.builtin.systemd:
+    name: mongos
+    state: restarted
+  listen: "Restart mongos"
+  when:
+    - mongodb_deployment_mode == 'sharded'
+    - mongodb_mongos_router
+
+- name: Stop mongos
+  ansible.builtin.systemd:
+    name: mongos
+    state: stopped
+  listen: "Stop mongos"
+  when:
+    - mongodb_deployment_mode == 'sharded'
+    - mongodb_mongos_router
+
+- name: Start mongos
+  ansible.builtin.systemd:
+    name: mongos
+    state: started
+  listen: "Start mongos"
+  when:
+    - mongodb_deployment_mode == 'sharded'
+    - mongodb_mongos_router
+
+# -----------------------------------------------------------------------------
+# MongoDB Exporter Handlers
+# -----------------------------------------------------------------------------
+
+- name: Restart mongodb_exporter
+  ansible.builtin.systemd:
+    name: mongodb_exporter
+    state: restarted
+  listen: "Restart mongodb_exporter"
+  when: mongodb_exporter_enabled
+
+# -----------------------------------------------------------------------------
+# Cloud Manager Agent Handlers
+# -----------------------------------------------------------------------------
+
+- name: Restart mongodb-mms-automation-agent
+  ansible.builtin.systemd:
+    name: mongodb-mms-automation-agent
+    state: restarted
+  listen: "Restart mongodb-mms-automation-agent"
+  when: mongodb_cloud_manager_enabled
+
+# -----------------------------------------------------------------------------
+# Iptables Handler
+# -----------------------------------------------------------------------------
+
+- name: Save iptables rules
+  ansible.builtin.shell: |
+    if command -v iptables-save &> /dev/null; then
+      if [ -d /etc/sysconfig ]; then
+        iptables-save > /etc/sysconfig/iptables
+      elif [ -d /etc/iptables ]; then
+        iptables-save > /etc/iptables/rules.v4
+      fi
+    fi
+  listen: "Save iptables rules"
+  changed_when: false
+
+# -----------------------------------------------------------------------------
+# Rolling Restart Handler (for cluster operations)
+# -----------------------------------------------------------------------------
+
+- name: Rolling restart mongod
+  block:
+    - name: Stop mongod on secondary first
+      ansible.builtin.systemd:
+        name: "{{ mongodb_service_name }}"
+        state: stopped
+      when: inventory_hostname != _rs_current_primary.stdout.split(':')[0]
+
+    - name: Wait for secondary to stop
+      ansible.builtin.pause:
+        seconds: 10
+      when: inventory_hostname != _rs_current_primary.stdout.split(':')[0]
+
+    - name: Start mongod on secondary
+      ansible.builtin.systemd:
+        name: "{{ mongodb_service_name }}"
+        state: started
+      when: inventory_hostname != _rs_current_primary.stdout.split(':')[0]
+
+    - name: Wait for secondary to rejoin
+      ansible.builtin.pause:
+        seconds: 30
+      when: inventory_hostname != _rs_current_primary.stdout.split(':')[0]
+
+  listen: "Rolling restart mongod"
+  when: mongodb_deployment_mode == 'replicaset'
+
+# -----------------------------------------------------------------------------
+# Configuration Validation Handler
+# -----------------------------------------------------------------------------
+
+- name: Validate mongodb config
+  ansible.builtin.command: >
+    mongod --config {{ mongodb_config_file }} --validate
+  listen: "Validate mongodb config"
+  changed_when: false
+
+# -----------------------------------------------------------------------------
+# Wait for MongoDB Ready Handler
+# -----------------------------------------------------------------------------
+
+- name: Wait for mongod ready
+  ansible.builtin.wait_for:
+    port: "{{ mongodb_port }}"
+    host: localhost
+    delay: 5
+    timeout: 120
+  listen: "Wait for mongod ready"
+
+# -----------------------------------------------------------------------------
+# Replica Set Reconfiguration Handler
+# -----------------------------------------------------------------------------
+
+- name: Reconfigure replica set
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval 'rs.reconfig(rs.conf())'
+    --quiet
+  listen: "Reconfigure replica set"
+  when: mongodb_deployment_mode == 'replicaset'
+  run_once: true
+  changed_when: false
+
+# -----------------------------------------------------------------------------
+# Log Rotation Handler
+# -----------------------------------------------------------------------------
+
+- name: Rotate mongodb logs
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval "db.adminCommand({ logRotate: 1 })"
+    --quiet
+  listen: "Rotate mongodb logs"
+  changed_when: false
