@@ -182,6 +182,84 @@
     - mongodb-healthcheck
 
 # -----------------------------------------------------------------------------
+# Point-in-Time Recovery (PITR)
+# -----------------------------------------------------------------------------
+
+- name: Configure Point-in-Time Recovery
+  ansible.builtin.include_tasks: pitr.yml
+  when: mongodb_pitr_enabled
+  tags:
+    - mongodb
+    - mongodb-pitr
+
+# -----------------------------------------------------------------------------
+# Alerting Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure alerting and notifications
+  ansible.builtin.include_tasks: alerting.yml
+  when: mongodb_alerting_enabled
+  tags:
+    - mongodb
+    - mongodb-alerting
+
+# -----------------------------------------------------------------------------
+# Disaster Recovery
+# -----------------------------------------------------------------------------
+
+- name: Configure disaster recovery
+  ansible.builtin.include_tasks: disaster_recovery.yml
+  when: mongodb_deployment_mode in ['replicaset', 'sharded']
+  tags:
+    - mongodb
+    - mongodb-dr
+
+# -----------------------------------------------------------------------------
+# Advanced Performance Tuning
+# -----------------------------------------------------------------------------
+
+- name: Configure advanced performance tuning
+  ansible.builtin.include_tasks: performance_tuning.yml
+  when: mongodb_performance_index_advisor_enabled or mongodb_performance_query_analyzer_enabled
+  tags:
+    - mongodb
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# Compliance & Audit
+# -----------------------------------------------------------------------------
+
+- name: Configure compliance and audit
+  ansible.builtin.include_tasks: compliance.yml
+  when: mongodb_compliance_reports_enabled or mongodb_audit_enabled | default(false)
+  tags:
+    - mongodb
+    - mongodb-compliance
+
+# -----------------------------------------------------------------------------
+# Chaos Testing Setup
+# -----------------------------------------------------------------------------
+
+- name: Configure chaos testing tools
+  ansible.builtin.include_tasks: chaos_testing.yml
+  when: mongodb_chaos_install_tools
+  tags:
+    - mongodb
+    - mongodb-chaos
+    - never
+
+# -----------------------------------------------------------------------------
+# Rolling Upgrade (Manual Trigger)
+# -----------------------------------------------------------------------------
+
+- name: Perform rolling upgrade
+  ansible.builtin.include_tasks: rolling_upgrade.yml
+  when: mongodb_rolling_upgrade_enabled
+  tags:
+    - mongodb-rolling-upgrade
+    - never
+
+# -----------------------------------------------------------------------------
 # Post-tasks (hooks)
 # -----------------------------------------------------------------------------
 

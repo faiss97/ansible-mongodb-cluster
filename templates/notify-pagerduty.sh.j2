@@ -1,0 +1,53 @@
+#!/bin/bash
+# =============================================================================
+# PagerDuty Notification Script
+# =============================================================================
+
+set -euo pipefail
+
+source /opt/mongodb-alerting/alerting.conf
+
+SEVERITY="$1"
+MESSAGE="$2"
+DETAILS="${3:-No additional details}"
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+HOSTNAME=$(hostname -f)
+DEDUP_KEY="mongodb-${HOSTNAME}-$(echo ${MESSAGE} | md5sum | cut -d' ' -f1)"
+
+# Map severity to PagerDuty severity
+case ${SEVERITY} in
+    critical) PD_SEVERITY="critical" ;;
+    warning) PD_SEVERITY="warning" ;;
+    info) PD_SEVERITY="info" ;;
+    *) PD_SEVERITY="info" ;;
+esac
+
+PAYLOAD=$(cat << EOF
+{
+    "routing_key": "${PAGERDUTY_ROUTING_KEY}",
+    "event_action": "trigger",
+    "dedup_key": "${DEDUP_KEY}",
+    "payload": {
+        "summary": "${MESSAGE}",
+        "severity": "${PD_SEVERITY}",
+        "source": "${HOSTNAME}",
+        "timestamp": "${TIMESTAMP}",
+        "component": "mongodb",
+        "group": "database",
+        "class": "mongodb-alert",
+        "custom_details": {
+            "details": "${DETAILS}",
+            "hostname": "${HOSTNAME}",
+            "severity": "${SEVERITY}"
+        }
+    }
+}
+EOF
+)
+
+curl -s -X POST \
+    -H "Content-Type: application/json" \
+    -d "${PAYLOAD}" \
+    "https://events.pagerduty.com/v2/enqueue" > /dev/null
+
+exit 0

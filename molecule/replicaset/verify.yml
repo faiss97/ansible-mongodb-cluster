@@ -1,0 +1,146 @@
+---
+# =============================================================================
+# Molecule Replica Set Verify Playbook
+# =============================================================================
+
+- name: Verify MongoDB Replica Set
+  hosts: mongodb
+  become: true
+  gather_facts: false
+
+  vars:
+    mongo_auth: "-u admin -p 'TestAdminPass123!' --authenticationDatabase admin"
+
+  tasks:
+    # Basic connectivity tests
+    - name: Verify MongoDB service is running
+      ansible.builtin.systemd:
+        name: mongod
+      register: mongod_service
+
+    - name: Assert MongoDB is active
+      ansible.builtin.assert:
+        that:
+          - mongod_service.status.ActiveState == 'active'
+        fail_msg: "MongoDB service is not running"
+        success_msg: "MongoDB service is running"
+
+    - name: Verify MongoDB is listening
+      ansible.builtin.wait_for:
+        port: 27017
+        host: localhost
+        timeout: 30
+
+    # Authentication tests
+    - name: Test authentication
+      ansible.builtin.command: >
+        mongosh --host localhost --port 27017
+        {{ mongo_auth }}
+        --eval "db.adminCommand('ping')"
+        --quiet
+      register: auth_test
+      changed_when: false
+
+    - name: Assert authentication works
+      ansible.builtin.assert:
+        that:
+          - auth_test.rc == 0
+        fail_msg: "Authentication failed"
+        success_msg: "Authentication successful"
+
+    # Replica set tests (run once)
+    - name: Get replica set status
+      ansible.builtin.command: >
+        mongosh --host localhost --port 27017
+        {{ mongo_auth }}
+        --eval "JSON.stringify(rs.status())"
+        --quiet
+      register: rs_status_raw
+      changed_when: false
+      run_once: true
+
+    - name: Parse replica set status
+      ansible.builtin.set_fact:
+        rs_status: "{{ rs_status_raw.stdout | from_json }}"
+      run_once: true
+
+    - name: Assert replica set is healthy
+      ansible.builtin.assert:
+        that:
+          - rs_status.ok == 1
+          - rs_status.members | length == 3
+        fail_msg: "Replica set is not healthy"
+        success_msg: "Replica set has 3 members"
+      run_once: true
+
+    - name: Assert primary exists
+      ansible.builtin.assert:
+        that:
+          - rs_status.members | selectattr('stateStr', 'eq', 'PRIMARY') | list | length == 1
+        fail_msg: "No PRIMARY found in replica set"
+        success_msg: "PRIMARY node exists"
+      run_once: true
+
+    - name: Assert secondaries exist
+      ansible.builtin.assert:
+        that:
+          - rs_status.members | selectattr('stateStr', 'eq', 'SECONDARY') | list | length == 2
+        fail_msg: "Expected 2 SECONDARY nodes"
+        success_msg: "2 SECONDARY nodes exist"
+      run_once: true
+
+    # Write test
+    - name: Test write operation
+      ansible.builtin.command: >
+        mongosh --host localhost --port 27017
+        {{ mongo_auth }}
+        --eval "db.getSiblingDB('test').molecule.insertOne({test: 'molecule', ts: new Date()})"
+        --quiet
+      register: write_test
+      changed_when: false
+      run_once: true
+
+    - name: Assert write succeeded
+      ansible.builtin.assert:
+        that:
+          - write_test.rc == 0
+        fail_msg: "Write operation failed"
+        success_msg: "Write operation successful"
+      run_once: true
+
+    # Read test
+    - name: Test read operation
+      ansible.builtin.command: >
+        mongosh --host localhost --port 27017
+        {{ mongo_auth }}
+        --eval "db.getSiblingDB('test').molecule.findOne({test: 'molecule'})"
+        --quiet
+      register: read_test
+      changed_when: false
+      run_once: true
+
+    - name: Assert read succeeded
+      ansible.builtin.assert:
+        that:
+          - read_test.rc == 0
+          - "'molecule' in read_test.stdout"
+        fail_msg: "Read operation failed"
+        success_msg: "Read operation successful"
+      run_once: true
+
+    # Summary
+    - name: Display verification summary
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════╗
+          ║         MongoDB Replica Set Verification Complete            ║
+          ╠══════════════════════════════════════════════════════════════╣
+          ║ ✅ MongoDB service running                                    ║
+          ║ ✅ Authentication working                                     ║
+          ║ ✅ Replica set initialized (3 members)                        ║
+          ║ ✅ PRIMARY elected                                            ║
+          ║ ✅ 2 SECONDARY nodes                                          ║
+          ║ ✅ Write operations working                                   ║
+          ║ ✅ Read operations working                                    ║
+          ╚══════════════════════════════════════════════════════════════╝
+      run_once: true

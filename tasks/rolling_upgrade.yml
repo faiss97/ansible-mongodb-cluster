@@ -1,0 +1,394 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Rolling Upgrade Tasks
+# =============================================================================
+# Performs rolling upgrades and restarts without service interruption.
+# Follows MongoDB best practices: secondaries first, then stepdown primary.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Pre-Upgrade Validation
+# -----------------------------------------------------------------------------
+
+- name: RollingUpgrade | Validate upgrade prerequisites
+  block:
+    - name: RollingUpgrade | Check current MongoDB version
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "db.version()"
+        --quiet
+      register: _current_version
+      changed_when: false
+
+    - name: RollingUpgrade | Display current version
+      ansible.builtin.debug:
+        msg: "Current MongoDB version: {{ _current_version.stdout }}"
+
+    - name: RollingUpgrade | Check replica set health before upgrade
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "rs.status().ok"
+        --quiet
+      register: _rs_health_pre
+      changed_when: false
+      failed_when: _rs_health_pre.stdout != '1'
+      when: mongodb_deployment_mode == 'replicaset'
+
+    - name: RollingUpgrade | Verify all members are healthy
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "rs.status().members.every(m => m.health === 1)"
+        --quiet
+      register: _members_healthy
+      changed_when: false
+      failed_when: _members_healthy.stdout != 'true'
+      when: mongodb_deployment_mode == 'replicaset'
+      run_once: true
+
+    - name: RollingUpgrade | Check replication lag before upgrade
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval '
+          var status = rs.status();
+          var primary = status.members.find(m => m.stateStr === "PRIMARY");
+          var maxLag = 0;
+          status.members.filter(m => m.stateStr === "SECONDARY").forEach(s => {
+            var lag = (primary.optimeDate - s.optimeDate) / 1000;
+            if (lag > maxLag) maxLag = lag;
+          });
+          print(maxLag);
+        '
+        --quiet
+      register: _repl_lag_pre
+      changed_when: false
+      when: mongodb_deployment_mode == 'replicaset'
+      run_once: true
+
+    - name: RollingUpgrade | Fail if replication lag too high
+      ansible.builtin.fail:
+        msg: "Replication lag ({{ _repl_lag_pre.stdout }}s) exceeds threshold. Fix replication before upgrade."
+      when:
+        - mongodb_deployment_mode == 'replicaset'
+        - (_repl_lag_pre.stdout | int) > mongodb_rolling_upgrade_max_lag | default(60)
+      run_once: true
+
+  tags:
+    - mongodb-rolling-upgrade
+    - mongodb-rolling-upgrade-validate
+
+# -----------------------------------------------------------------------------
+# Identify Node Roles
+# -----------------------------------------------------------------------------
+
+- name: RollingUpgrade | Identify primary node
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval "rs.status().members.find(m => m.stateStr === 'PRIMARY').name"
+    --quiet
+  register: _primary_node
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ groups[mongodb_replicaset_group | default('mongodb')][0] }}"
+  when: mongodb_deployment_mode == 'replicaset'
+  tags:
+    - mongodb-rolling-upgrade
+
+- name: RollingUpgrade | Set node role facts
+  ansible.builtin.set_fact:
+    _mongodb_is_primary: "{{ inventory_hostname in _primary_node.stdout }}"
+    _mongodb_primary_host: "{{ _primary_node.stdout.split(':')[0] }}"
+  when: mongodb_deployment_mode == 'replicaset'
+  tags:
+    - mongodb-rolling-upgrade
+
+- name: RollingUpgrade | Display node roles
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} is {{ 'PRIMARY' if _mongodb_is_primary else 'SECONDARY' }}"
+  when: mongodb_deployment_mode == 'replicaset'
+  tags:
+    - mongodb-rolling-upgrade
+
+# -----------------------------------------------------------------------------
+# Upgrade Secondary Nodes First
+# -----------------------------------------------------------------------------
+
+- name: RollingUpgrade | Upgrade secondary nodes
+  block:
+    - name: RollingUpgrade | Stop MongoDB on secondary
+      ansible.builtin.systemd:
+        name: "{{ mongodb_service_name }}"
+        state: stopped
+      
+    - name: RollingUpgrade | Wait for service to stop
+      ansible.builtin.wait_for:
+        port: "{{ mongodb_port }}"
+        host: localhost
+        state: stopped
+        timeout: 120
+
+    - name: RollingUpgrade | Upgrade MongoDB packages
+      ansible.builtin.include_tasks: install.yml
+
+    - name: RollingUpgrade | Start MongoDB on secondary
+      ansible.builtin.systemd:
+        name: "{{ mongodb_service_name }}"
+        state: started
+
+    - name: RollingUpgrade | Wait for MongoDB to start
+      ansible.builtin.wait_for:
+        port: "{{ mongodb_port }}"
+        host: localhost
+        delay: 10
+        timeout: 120
+
+    - name: RollingUpgrade | Wait for secondary to rejoin replica set
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "rs.status().members.find(m => m.name.includes('{{ inventory_hostname }}')).stateStr"
+        --quiet
+      register: _secondary_state
+      until: _secondary_state.stdout == 'SECONDARY'
+      retries: 60
+      delay: 10
+      changed_when: false
+
+    - name: RollingUpgrade | Wait for secondary to catch up
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval '
+          var status = rs.status();
+          var me = status.members.find(m => m.self);
+          var primary = status.members.find(m => m.stateStr === "PRIMARY");
+          var lag = primary ? (primary.optimeDate - me.optimeDate) / 1000 : 0;
+          print(lag);
+        '
+        --quiet
+      register: _catchup_lag
+      until: (_catchup_lag.stdout | int) < 10
+      retries: 60
+      delay: 10
+      changed_when: false
+
+    - name: RollingUpgrade | Pause between secondary upgrades
+      ansible.builtin.pause:
+        seconds: "{{ mongodb_rolling_upgrade_pause | default(30) }}"
+
+  when:
+    - mongodb_deployment_mode == 'replicaset'
+    - not _mongodb_is_primary
+  tags:
+    - mongodb-rolling-upgrade
+    - mongodb-rolling-upgrade-secondary
+
+# -----------------------------------------------------------------------------
+# Upgrade Primary Node (Last)
+# -----------------------------------------------------------------------------
+
+- name: RollingUpgrade | Upgrade primary node
+  block:
+    - name: RollingUpgrade | Verify all secondaries are upgraded and healthy
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "rs.status().members.filter(m => m.stateStr === 'SECONDARY' && m.health === 1).length"
+        --quiet
+      register: _healthy_secondaries
+      changed_when: false
+      failed_when: (_healthy_secondaries.stdout | int) < 1
+
+    - name: RollingUpgrade | Step down primary
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "rs.stepDown(60, 30)"
+        --quiet
+      register: _stepdown_result
+      failed_when: false
+      changed_when: true
+
+    - name: RollingUpgrade | Wait for new primary election
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "rs.status().members.filter(m => m.stateStr === 'PRIMARY').length"
+        --quiet
+      register: _new_primary
+      until: (_new_primary.stdout | int) >= 1
+      retries: 30
+      delay: 5
+      changed_when: false
+
+    - name: RollingUpgrade | Verify this node is now secondary
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "rs.status().members.find(m => m.self).stateStr"
+        --quiet
+      register: _current_state
+      until: _current_state.stdout == 'SECONDARY'
+      retries: 30
+      delay: 5
+      changed_when: false
+
+    - name: RollingUpgrade | Stop MongoDB on old primary
+      ansible.builtin.systemd:
+        name: "{{ mongodb_service_name }}"
+        state: stopped
+
+    - name: RollingUpgrade | Upgrade MongoDB packages on old primary
+      ansible.builtin.include_tasks: install.yml
+
+    - name: RollingUpgrade | Start MongoDB on old primary
+      ansible.builtin.systemd:
+        name: "{{ mongodb_service_name }}"
+        state: started
+
+    - name: RollingUpgrade | Wait for node to rejoin as secondary
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "rs.status().members.find(m => m.self).stateStr"
+        --quiet
+      register: _rejoin_state
+      until: _rejoin_state.stdout in ['PRIMARY', 'SECONDARY']
+      retries: 60
+      delay: 10
+      changed_when: false
+
+  when:
+    - mongodb_deployment_mode == 'replicaset'
+    - _mongodb_is_primary
+  tags:
+    - mongodb-rolling-upgrade
+    - mongodb-rolling-upgrade-primary
+
+# -----------------------------------------------------------------------------
+# Post-Upgrade Validation
+# -----------------------------------------------------------------------------
+
+- name: RollingUpgrade | Post-upgrade validation
+  block:
+    - name: RollingUpgrade | Check new MongoDB version
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "db.version()"
+        --quiet
+      register: _new_version
+      changed_when: false
+
+    - name: RollingUpgrade | Display new version
+      ansible.builtin.debug:
+        msg: "Upgraded MongoDB version: {{ _new_version.stdout }}"
+
+    - name: RollingUpgrade | Verify replica set health after upgrade
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "rs.status().ok"
+        --quiet
+      register: _rs_health_post
+      changed_when: false
+      failed_when: _rs_health_post.stdout != '1'
+      when: mongodb_deployment_mode == 'replicaset'
+
+    - name: RollingUpgrade | Update feature compatibility version
+      ansible.builtin.command: >
+        mongosh --host localhost --port {{ mongodb_port }}
+        {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+        --eval "db.adminCommand({ setFeatureCompatibilityVersion: '{{ mongodb_feature_compatibility_version }}' })"
+        --quiet
+      when:
+        - mongodb_feature_compatibility_version is defined
+        - mongodb_feature_compatibility_version | length > 0
+      run_once: true
+      delegate_to: "{{ _mongodb_primary_host }}"
+
+  tags:
+    - mongodb-rolling-upgrade
+    - mongodb-rolling-upgrade-validate
+
+# -----------------------------------------------------------------------------
+# Rolling Restart (Without Upgrade)
+# -----------------------------------------------------------------------------
+
+- name: RollingRestart | Perform rolling restart
+  block:
+    - name: RollingRestart | Restart secondary nodes first
+      ansible.builtin.systemd:
+        name: "{{ mongodb_service_name }}"
+        state: restarted
+      when: not _mongodb_is_primary
+      throttle: 1
+
+    - name: RollingRestart | Wait for secondary to recover
+      ansible.builtin.wait_for:
+        port: "{{ mongodb_port }}"
+        host: localhost
+        delay: 10
+        timeout: 120
+      when: not _mongodb_is_primary
+
+    - name: RollingRestart | Pause between restarts
+      ansible.builtin.pause:
+        seconds: "{{ mongodb_rolling_restart_pause | default(30) }}"
+      when: not _mongodb_is_primary
+
+    - name: RollingRestart | Step down and restart primary
+      block:
+        - name: RollingRestart | Step down primary
+          ansible.builtin.command: >
+            mongosh --host localhost --port {{ mongodb_port }}
+            {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+            --eval "rs.stepDown(60, 30)"
+            --quiet
+          failed_when: false
+
+        - name: RollingRestart | Wait for election
+          ansible.builtin.pause:
+            seconds: 30
+
+        - name: RollingRestart | Restart old primary
+          ansible.builtin.systemd:
+            name: "{{ mongodb_service_name }}"
+            state: restarted
+
+        - name: RollingRestart | Wait for node to recover
+          ansible.builtin.wait_for:
+            port: "{{ mongodb_port }}"
+            host: localhost
+            delay: 10
+            timeout: 120
+
+      when: _mongodb_is_primary
+
+  when:
+    - mongodb_deployment_mode == 'replicaset'
+    - mongodb_rolling_restart | default(false)
+  tags:
+    - mongodb-rolling-restart
+
+# -----------------------------------------------------------------------------
+# Upgrade Summary
+# -----------------------------------------------------------------------------
+
+- name: RollingUpgrade | Display upgrade summary
+  ansible.builtin.debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+      Rolling Upgrade Summary
+      ═══════════════════════════════════════════════════════════════════════
+      Node: {{ inventory_hostname }}
+      Previous Version: {{ _current_version.stdout | default('N/A') }}
+      Current Version: {{ _new_version.stdout | default('N/A') }}
+      Status: SUCCESS
+      ═══════════════════════════════════════════════════════════════════════
+  tags:
+    - mongodb-rolling-upgrade

@@ -1,0 +1,129 @@
+---
+# =============================================================================
+# Molecule Replica Set Scenario - Multi-OS Testing
+# =============================================================================
+
+dependency:
+  name: galaxy
+  options:
+    requirements-file: requirements.yml
+
+driver:
+  name: docker
+
+platforms:
+  # Ubuntu 22.04 Cluster
+  - name: mongo-ubuntu-1
+    image: geerlingguy/docker-${MOLECULE_DISTRO:-ubuntu2204}-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    groups:
+      - mongodb
+      - mongodb_primary
+    docker_networks:
+      - name: molecule-rs-ubuntu
+        ipam_config:
+          - subnet: "10.40.0.0/24"
+    networks:
+      - name: molecule-rs-ubuntu
+        ipv4_address: "10.40.0.11"
+
+  - name: mongo-ubuntu-2
+    image: geerlingguy/docker-${MOLECULE_DISTRO:-ubuntu2204}-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    groups:
+      - mongodb
+      - mongodb_secondary
+    networks:
+      - name: molecule-rs-ubuntu
+        ipv4_address: "10.40.0.12"
+
+  - name: mongo-ubuntu-3
+    image: geerlingguy/docker-${MOLECULE_DISTRO:-ubuntu2204}-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    groups:
+      - mongodb
+      - mongodb_secondary
+    networks:
+      - name: molecule-rs-ubuntu
+        ipv4_address: "10.40.0.13"
+
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      callbacks_enabled: profile_tasks
+      gathering: smart
+      fact_caching: jsonfile
+      fact_caching_connection: /tmp/ansible_facts
+    ssh_connection:
+      pipelining: true
+  inventory:
+    group_vars:
+      mongodb:
+        # MongoDB Configuration
+        mongodb_version: "7.0"
+        mongodb_deployment_mode: "replicaset"
+        mongodb_replicaset_name: "rs0"
+        
+        # Security
+        mongodb_security_auth_enabled: true
+        mongodb_admin_user: "admin"
+        mongodb_admin_password: "TestAdminPass123!"
+        mongodb_cluster_admin_user: "clusteradmin"
+        mongodb_cluster_admin_password: "TestClusterPass123!"
+        mongodb_backup_password: "TestBackupPass123!"
+        mongodb_monitoring_password: "TestMonitorPass123!"
+        
+        # Network
+        mongodb_bind_ip: "0.0.0.0"
+        
+        # Disable features not needed in testing
+        mongodb_configure_firewall: false
+        mongodb_configure_selinux: false
+        mongodb_backup_enabled: false
+        mongodb_exporter_enabled: false
+        mongodb_alerting_enabled: false
+        mongodb_pitr_enabled: false
+        
+        # Replica Set Members
+        mongodb_replicaset_members:
+          - host: "10.40.0.11:27017"
+            priority: 2
+          - host: "10.40.0.12:27017"
+            priority: 1
+          - host: "10.40.0.13:27017"
+            priority: 1
+
+verifier:
+  name: ansible
+
+scenario:
+  name: replicaset
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - side_effect
+    - verify
+    - cleanup
+    - destroy

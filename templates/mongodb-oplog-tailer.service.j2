@@ -1,0 +1,21 @@
+[Unit]
+Description=MongoDB Oplog Tailer for PITR
+Documentation=https://docs.mongodb.com/manual/core/replica-set-oplog/
+After=network-online.target mongod.service
+Wants=network-online.target
+Requires=mongod.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/mongodb-oplog-tailer.sh
+Restart=on-failure
+RestartSec=30
+
+# Logging
+StandardOutput=append:{{ mongodb_pitr_directory }}/logs/oplog-tailer.log
+StandardError=append:{{ mongodb_pitr_directory }}/logs/oplog-tailer.log
+
+[Install]
+WantedBy=multi-user.target

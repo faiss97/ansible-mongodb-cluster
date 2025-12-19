@@ -7,55 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0] - 2025-12-18
+## [1.1.0] - 2024-12-19
 
 ### Added
+- **Rolling Upgrades**: Zero-downtime MongoDB version upgrades
+- **Point-in-Time Recovery (PITR)**: Continuous oplog backup and restore
+- **Multi-Channel Alerting**: Slack, Teams, PagerDuty, Email, Webhooks
+- **Disaster Recovery**: Delayed secondaries, DR runbooks, failover scripts
+- **Advanced Performance Tuning**: Index advisor, query analyzer, benchmarks
+- **Compliance & Audit**: CIS Benchmark, GDPR helpers, audit logging
+- **Chaos Engineering**: Failover tests, network partition, benchmarks
+- **CI/CD Pipeline**: GitHub Actions, Molecule tests, Galaxy publishing
+- **Monitoring**: Grafana dashboards, Prometheus alert rules
+- **Documentation**: MkDocs site with architecture diagrams
 
+## [1.0.0] - 2024-12-19
+
+### Added
 - Initial release
-- Standalone MongoDB deployment support
-- Replica Set deployment with automatic initialization
-- Sharded Cluster deployment support
-- Config servers, shard servers, and mongos routers
-- Security features:
-  - Authentication and authorization
-  - Keyfile generation for replica sets
-  - TLS/SSL support
-  - LDAP and Kerberos integration (Enterprise)
-- User management:
-  - Admin, cluster admin, backup, and monitoring users
-  - Application user creation
-  - Custom role creation
-- System configuration:
-  - ulimits and sysctl tuning
-  - Transparent Huge Pages disabled
-  - NUMA optimization
-  - SELinux support
-- Firewall configuration (firewalld, ufw, iptables)
-- Automated backup with:
-  - Scheduled mongodump
-  - Retention management
-  - S3 upload support
-  - Backup verification
-- Monitoring:
-  - Prometheus MongoDB exporter
-  - MongoDB Free Monitoring
-  - Cloud Manager integration
+- Standalone, replica set, and sharded cluster deployment
+- Security: authentication, TLS/SSL, keyfile, LDAP, Kerberos
+- User management with custom roles
+- System tuning: ulimits, sysctl, THP, NUMA
+- Firewall management (firewalld/ufw/iptables)
+- Automated backup with S3 support
+- Prometheus exporter monitoring
 - Health checks and validation
-- Multi-platform support:
-  - Debian 11, 12
-  - Ubuntu 20.04, 22.04, 24.04
-  - RHEL 8, 9
-  - Rocky Linux 8, 9
-  - AlmaLinux 8, 9
-- Comprehensive documentation
-- Example playbooks and inventories
-- Molecule testing framework
+- Multi-platform support (Ubuntu, Debian, RHEL, Rocky, Alma)
 
-### Security
-
-- All passwords must be set via encrypted vault variables
-- Keyfile permissions enforced (0400)
-- TLS certificate validation
-- Network binding restrictions
-
-### Features
+[Unreleased]: https://github.com/faiss97/ansible-mongodb-cluster/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/faiss97/ansible-mongodb-cluster/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/faiss97/ansible-mongodb-cluster/releases/tag/v1.0.0

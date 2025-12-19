@@ -562,4 +562,169 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 DevOps faiss97
 
-## Acknowledgments
+## Advanced Features
+
+### Rolling Upgrades
+
+Perform zero-downtime upgrades:
+
+```yaml
+# Enable and run rolling upgrade
+mongodb_rolling_upgrade_enabled: true
+mongodb_version: "7.0"  # Target version
+```
+
+```bash
+ansible-playbook -i inventory playbook.yml --tags mongodb-rolling-upgrade
+```
+
+### Point-in-Time Recovery (PITR)
+
+Enable continuous oplog backup for point-in-time recovery:
+
+```yaml
+mongodb_pitr_enabled: true
+mongodb_pitr_directory: "/var/backup/mongodb-pitr"
+mongodb_pitr_snapshot_interval_hours: 6
+```
+
+Restore to a specific point in time:
+
+```bash
+/usr/local/bin/mongodb-pitr-restore.sh -t "2024-01-15T10:30:00Z"
+```
+
+### Alerting & Notifications
+
+Configure multi-channel alerting:
+
+```yaml
+mongodb_alerting_enabled: true
+
+# Slack
+mongodb_alerting_slack_enabled: true
+mongodb_alerting_slack_webhook: "https://hooks.slack.com/services/..."
+
+# PagerDuty (critical alerts only)
+mongodb_alerting_pagerduty_enabled: true
+mongodb_alerting_pagerduty_key: "your-routing-key"
+
+# Microsoft Teams
+mongodb_alerting_teams_enabled: true
+mongodb_alerting_teams_webhook: "https://outlook.office.com/webhook/..."
+
+# Email
+mongodb_alerting_email_enabled: true
+mongodb_alerting_email_recipients:
+  - dba@example.com
+  - oncall@example.com
+
+# Thresholds
+mongodb_alerting_repl_lag_warning: 30
+mongodb_alerting_repl_lag_critical: 60
+mongodb_alerting_disk_warning: 80
+mongodb_alerting_disk_critical: 90
+```
+
+### Disaster Recovery
+
+Configure delayed secondary and cross-DC replication:
+
+```yaml
+# Delayed secondary for accidental deletion protection
+mongodb_dr_delayed_member: "mongo-dr.example.com"
+mongodb_dr_delay_seconds: 3600  # 1 hour delay
+
+# Write concern for cross-DC durability
+mongodb_dr_configure_write_concern: true
+mongodb_dr_write_concern: "majority"
+```
+
+Runbooks are automatically generated at `/opt/mongodb-dr/runbooks/`:
+- `complete-failure.md` - Full cluster recovery
+- `datacenter-failure.md` - DC failover procedures
+- `network-partition.md` - Split-brain handling
+- `data-corruption.md` - Data recovery steps
+
+### Performance Tuning
+
+Automatic performance analysis and recommendations:
+
+```yaml
+mongodb_performance_index_advisor_enabled: true
+mongodb_performance_query_analyzer_enabled: true
+mongodb_performance_reports_enabled: true
+```
+
+Scripts available at `/opt/mongodb-performance/scripts/`:
+- `mongodb-index-advisor.sh` - Index optimization recommendations
+- `mongodb-query-analyzer.sh` - Slow query analysis
+- `mongodb-performance-report.sh` - Weekly performance reports
+
+### Compliance & Audit
+
+GDPR and audit compliance helpers:
+
+```yaml
+mongodb_compliance_reports_enabled: true
+mongodb_audit_enabled: true  # Enterprise only
+mongodb_fle_enabled: true    # Field-Level Encryption (Enterprise)
+```
+
+GDPR Scripts at `/opt/mongodb-compliance/scripts/`:
+- `mongodb-gdpr-export.sh` - Export user data
+- `mongodb-gdpr-delete.sh` - Delete user data (right to be forgotten)
+- `mongodb-gdpr-anonymize.js` - Anonymize personal data
+
+Example GDPR export:
+```bash
+/opt/mongodb-compliance/scripts/mongodb-gdpr-export.sh -u "user@example.com" -d myapp
+```
+
+### Chaos Engineering
+
+Built-in chaos testing for resilience validation:
+
+```yaml
+mongodb_chaos_install_tools: true
+```
+
+Available tests at `/opt/mongodb-chaos/scripts/`:
+- `chaos-kill-primary.sh` - Test primary failover
+- `chaos-failover-test.sh` - Controlled failover test
+- `chaos-network-partition.sh` - Network partition simulation
+- `benchmark-runner.sh` - Performance benchmarks
+
+Run failover test:
+```bash
+/opt/mongodb-chaos/scripts/chaos-failover-test.sh
+```
+
+Run performance benchmark:
+```bash
+/opt/mongodb-chaos/scripts/benchmark-runner.sh 10000 100  # 10k docs, batch 100
+```
+
+## Tags Reference
+
+| Tag | Description |
+|-----|-------------|
+| `mongodb` | All MongoDB tasks |
+| `mongodb-install` | Installation only |
+| `mongodb-configure` | Configuration only |
+| `mongodb-replicaset` | Replica set setup |
+| `mongodb-sharding` | Sharded cluster setup |
+| `mongodb-users` | User management |
+| `mongodb-security` | Security configuration |
+| `mongodb-backup` | Backup configuration |
+| `mongodb-monitoring` | Monitoring setup |
+| `mongodb-firewall` | Firewall rules |
+| `mongodb-pitr` | Point-in-Time Recovery |
+| `mongodb-alerting` | Alerting configuration |
+| `mongodb-dr` | Disaster recovery |
+| `mongodb-performance` | Performance tuning |
+| `mongodb-compliance` | Compliance & audit |
+| `mongodb-chaos` | Chaos testing (never runs by default) |
+| `mongodb-rolling-upgrade` | Rolling upgrade (never runs by default) |
+| `mongodb-healthcheck` | Health checks |
+

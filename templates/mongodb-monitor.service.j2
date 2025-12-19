@@ -1,0 +1,9 @@
+[Unit]
+Description=MongoDB Health Monitor
+Documentation=https://docs.mongodb.com/
+
+[Service]
+Type=oneshot
+ExecStart=/opt/mongodb-alerting/scripts/mongodb-health-monitor.sh
+User=root
+Group=root

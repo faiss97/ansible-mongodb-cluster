@@ -1,0 +1,162 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Point-in-Time Recovery (PITR) Tasks
+# =============================================================================
+# Enables continuous backup with oplog for point-in-time recovery.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# PITR Configuration
+# -----------------------------------------------------------------------------
+
+- name: PITR | Create PITR directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0750"
+  loop:
+    - "{{ mongodb_pitr_directory }}"
+    - "{{ mongodb_pitr_directory }}/oplog"
+    - "{{ mongodb_pitr_directory }}/snapshots"
+    - "{{ mongodb_pitr_directory }}/logs"
+  tags:
+    - mongodb-pitr
+
+# -----------------------------------------------------------------------------
+# Continuous Oplog Backup
+# -----------------------------------------------------------------------------
+
+- name: PITR | Create oplog tailer script
+  ansible.builtin.template:
+    src: mongodb-oplog-tailer.sh.j2
+    dest: /usr/local/bin/mongodb-oplog-tailer.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-pitr
+
+- name: PITR | Create oplog tailer systemd service
+  ansible.builtin.template:
+    src: mongodb-oplog-tailer.service.j2
+    dest: /etc/systemd/system/mongodb-oplog-tailer.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+  tags:
+    - mongodb-pitr
+
+- name: PITR | Enable and start oplog tailer service
+  ansible.builtin.systemd:
+    name: mongodb-oplog-tailer
+    enabled: "{{ mongodb_pitr_enabled }}"
+    state: "{{ 'started' if mongodb_pitr_enabled else 'stopped' }}"
+    daemon_reload: true
+  when: mongodb_deployment_mode == 'replicaset'
+  tags:
+    - mongodb-pitr
+
+# -----------------------------------------------------------------------------
+# PITR Restore Script
+# -----------------------------------------------------------------------------
+
+- name: PITR | Create point-in-time restore script
+  ansible.builtin.template:
+    src: mongodb-pitr-restore.sh.j2
+    dest: /usr/local/bin/mongodb-pitr-restore.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-pitr
+
+# -----------------------------------------------------------------------------
+# Snapshot Management
+# -----------------------------------------------------------------------------
+
+- name: PITR | Create snapshot script
+  ansible.builtin.template:
+    src: mongodb-snapshot.sh.j2
+    dest: /usr/local/bin/mongodb-snapshot.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-pitr
+
+- name: PITR | Configure snapshot cron job
+  ansible.builtin.cron:
+    name: "MongoDB PITR Snapshot"
+    minute: "0"
+    hour: "*/{{ mongodb_pitr_snapshot_interval_hours | default(6) }}"
+    day: "*"
+    month: "*"
+    weekday: "*"
+    job: "/usr/local/bin/mongodb-snapshot.sh >> {{ mongodb_pitr_directory }}/logs/snapshot.log 2>&1"
+    user: root
+    state: "{{ 'present' if mongodb_pitr_enabled else 'absent' }}"
+  tags:
+    - mongodb-pitr
+
+# -----------------------------------------------------------------------------
+# Oplog Cleanup
+# -----------------------------------------------------------------------------
+
+- name: PITR | Create oplog cleanup script
+  ansible.builtin.template:
+    src: mongodb-oplog-cleanup.sh.j2
+    dest: /usr/local/bin/mongodb-oplog-cleanup.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-pitr
+
+- name: PITR | Configure oplog cleanup cron job
+  ansible.builtin.cron:
+    name: "MongoDB Oplog Cleanup"
+    minute: "30"
+    hour: "4"
+    day: "*"
+    month: "*"
+    weekday: "*"
+    job: "/usr/local/bin/mongodb-oplog-cleanup.sh >> {{ mongodb_pitr_directory }}/logs/cleanup.log 2>&1"
+    user: root
+    state: "{{ 'present' if mongodb_pitr_enabled else 'absent' }}"
+  tags:
+    - mongodb-pitr
+
+# -----------------------------------------------------------------------------
+# PITR Status Check
+# -----------------------------------------------------------------------------
+
+- name: PITR | Check PITR status
+  ansible.builtin.shell: |
+    set -o pipefail
+    if systemctl is-active mongodb-oplog-tailer > /dev/null 2>&1; then
+      LATEST_OPLOG=$(ls -t {{ mongodb_pitr_directory }}/oplog/*.bson 2>/dev/null | head -1)
+      if [ -n "$LATEST_OPLOG" ]; then
+        OPLOG_AGE=$(( ($(date +%s) - $(stat -c %Y "$LATEST_OPLOG")) / 60 ))
+        echo "PITR Active - Latest oplog: $OPLOG_AGE minutes ago"
+      else
+        echo "PITR Active - No oplog files yet"
+      fi
+    else
+      echo "PITR Inactive"
+    fi
+  args:
+    executable: /bin/bash
+  register: _pitr_status
+  changed_when: false
+  tags:
+    - mongodb-pitr
+
+- name: PITR | Display PITR status
+  ansible.builtin.debug:
+    msg: "{{ _pitr_status.stdout }}"
+  tags:
+    - mongodb-pitr

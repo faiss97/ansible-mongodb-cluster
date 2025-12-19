@@ -1,0 +1,11 @@
+[Unit]
+Description=MongoDB Health Monitor Timer
+Documentation=https://docs.mongodb.com/
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec={{ mongodb_alerting_interval | default(60) }}
+AccuracySec=10
+
+[Install]
+WantedBy=timers.target

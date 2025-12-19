@@ -1,0 +1,262 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Disaster Recovery Tasks
+# =============================================================================
+# Configures disaster recovery including cross-datacenter replication,
+# delayed secondaries, and automated failover procedures.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# DR Configuration Directory
+# -----------------------------------------------------------------------------
+
+- name: DR | Create disaster recovery directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - /opt/mongodb-dr
+    - /opt/mongodb-dr/scripts
+    - /opt/mongodb-dr/runbooks
+    - /opt/mongodb-dr/logs
+    - /opt/mongodb-dr/state
+  tags:
+    - mongodb-dr
+
+# -----------------------------------------------------------------------------
+# Delayed Secondary Configuration
+# -----------------------------------------------------------------------------
+
+- name: DR | Configure delayed secondary member
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval '
+      var config = rs.conf();
+      var memberIndex = config.members.findIndex(m => m.host.includes("{{ mongodb_dr_delayed_member }}"));
+      if (memberIndex >= 0) {
+        config.members[memberIndex].priority = 0;
+        config.members[memberIndex].hidden = true;
+        config.members[memberIndex].secondaryDelaySecs = {{ mongodb_dr_delay_seconds | default(3600) }};
+        config.members[memberIndex].votes = 0;
+        rs.reconfig(config);
+        print("Delayed secondary configured");
+      } else {
+        print("Member not found");
+      }
+    '
+    --quiet
+  register: _dr_delayed_config
+  when:
+    - mongodb_dr_delayed_member is defined
+    - mongodb_dr_delayed_member | length > 0
+    - mongodb_deployment_mode == 'replicaset'
+  run_once: true
+  delegate_to: "{{ groups[mongodb_replicaset_group | default('mongodb')][0] }}"
+  changed_when: "'configured' in _dr_delayed_config.stdout"
+  tags:
+    - mongodb-dr
+
+# -----------------------------------------------------------------------------
+# Cross-Datacenter Replication Check
+# -----------------------------------------------------------------------------
+
+- name: DR | Verify cross-datacenter members
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval '
+      var status = rs.status();
+      var dcMembers = {};
+      status.members.forEach(m => {
+        var dc = m.name.split(".")[1] || "default";
+        dcMembers[dc] = (dcMembers[dc] || 0) + 1;
+      });
+      print(JSON.stringify(dcMembers));
+    '
+    --quiet
+  register: _dr_dc_check
+  changed_when: false
+  when: mongodb_deployment_mode == 'replicaset'
+  run_once: true
+  tags:
+    - mongodb-dr
+
+- name: DR | Display datacenter distribution
+  ansible.builtin.debug:
+    msg: "Datacenter member distribution: {{ _dr_dc_check.stdout }}"
+  when: mongodb_deployment_mode == 'replicaset'
+  run_once: true
+  tags:
+    - mongodb-dr
+
+# -----------------------------------------------------------------------------
+# Automated Failover Scripts
+# -----------------------------------------------------------------------------
+
+- name: DR | Create manual failover script
+  ansible.builtin.template:
+    src: mongodb-dr-failover.sh.j2
+    dest: /opt/mongodb-dr/scripts/mongodb-dr-failover.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-dr
+
+- name: DR | Create failback script
+  ansible.builtin.template:
+    src: mongodb-dr-failback.sh.j2
+    dest: /opt/mongodb-dr/scripts/mongodb-dr-failback.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-dr
+
+# -----------------------------------------------------------------------------
+# DR Runbooks
+# -----------------------------------------------------------------------------
+
+- name: DR | Create complete failure runbook
+  ansible.builtin.template:
+    src: runbook-complete-failure.md.j2
+    dest: /opt/mongodb-dr/runbooks/complete-failure.md
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-dr
+
+- name: DR | Create primary datacenter failure runbook
+  ansible.builtin.template:
+    src: runbook-dc-failure.md.j2
+    dest: /opt/mongodb-dr/runbooks/datacenter-failure.md
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-dr
+
+- name: DR | Create network partition runbook
+  ansible.builtin.template:
+    src: runbook-network-partition.md.j2
+    dest: /opt/mongodb-dr/runbooks/network-partition.md
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-dr
+
+- name: DR | Create data corruption runbook
+  ansible.builtin.template:
+    src: runbook-data-corruption.md.j2
+    dest: /opt/mongodb-dr/runbooks/data-corruption.md
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-dr
+
+# -----------------------------------------------------------------------------
+# DR Health Check
+# -----------------------------------------------------------------------------
+
+- name: DR | Create DR health check script
+  ansible.builtin.template:
+    src: mongodb-dr-health.sh.j2
+    dest: /opt/mongodb-dr/scripts/mongodb-dr-health.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-dr
+
+# -----------------------------------------------------------------------------
+# Recovery Point Tracking
+# -----------------------------------------------------------------------------
+
+- name: DR | Create recovery point tracker
+  ansible.builtin.template:
+    src: mongodb-recovery-point.sh.j2
+    dest: /opt/mongodb-dr/scripts/mongodb-recovery-point.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-dr
+
+- name: DR | Configure recovery point tracking cron
+  ansible.builtin.cron:
+    name: "MongoDB Recovery Point Tracking"
+    minute: "*/5"
+    hour: "*"
+    day: "*"
+    month: "*"
+    weekday: "*"
+    job: "/opt/mongodb-dr/scripts/mongodb-recovery-point.sh >> /opt/mongodb-dr/logs/recovery-point.log 2>&1"
+    user: root
+    state: "{{ 'present' if mongodb_dr_tracking_enabled | default(true) else 'absent' }}"
+  tags:
+    - mongodb-dr
+
+# -----------------------------------------------------------------------------
+# DR Testing
+# -----------------------------------------------------------------------------
+
+- name: DR | Create DR test script
+  ansible.builtin.template:
+    src: mongodb-dr-test.sh.j2
+    dest: /opt/mongodb-dr/scripts/mongodb-dr-test.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-dr
+
+# -----------------------------------------------------------------------------
+# Write Concern Configuration for DR
+# -----------------------------------------------------------------------------
+
+- name: DR | Configure write concern for cross-DC durability
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval '
+      db.adminCommand({
+        setDefaultRWConcern: 1,
+        defaultWriteConcern: {
+          w: "{{ mongodb_dr_write_concern | default('majority') }}",
+          j: true,
+          wtimeout: {{ mongodb_dr_write_timeout | default(10000) }}
+        }
+      })
+    '
+    --quiet
+  when:
+    - mongodb_dr_configure_write_concern | default(false)
+    - mongodb_deployment_mode == 'replicaset'
+  run_once: true
+  delegate_to: "{{ groups[mongodb_replicaset_group | default('mongodb')][0] }}"
+  changed_when: false
+  tags:
+    - mongodb-dr
+
+# -----------------------------------------------------------------------------
+# DR Summary
+# -----------------------------------------------------------------------------
+
+- name: DR | Display DR configuration summary
+  ansible.builtin.debug:
+    msg: |
+      Disaster Recovery Configuration Summary:
+      - Delayed Secondary: {{ mongodb_dr_delayed_member | default('Not configured') }}
+      - Delay: {{ mongodb_dr_delay_seconds | default(3600) }} seconds
+      - Write Concern: {{ mongodb_dr_write_concern | default('majority') }}
+      - Recovery Point Tracking: {{ mongodb_dr_tracking_enabled | default(true) }}
+      - Runbooks Location: /opt/mongodb-dr/runbooks/
+  tags:
+    - mongodb-dr

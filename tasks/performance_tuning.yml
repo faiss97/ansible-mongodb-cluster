@@ -1,0 +1,319 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Advanced Performance Tuning Tasks
+# =============================================================================
+# Configures advanced performance optimizations including index analysis,
+# query optimization, connection pooling, and read/write concern tuning.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Performance Tuning Directory
+# -----------------------------------------------------------------------------
+
+- name: Performance | Create performance tuning directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0750"
+  loop:
+    - /opt/mongodb-performance
+    - /opt/mongodb-performance/scripts
+    - /opt/mongodb-performance/reports
+    - /opt/mongodb-performance/logs
+  tags:
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# Index Advisor
+# -----------------------------------------------------------------------------
+
+- name: Performance | Create index advisor script
+  ansible.builtin.template:
+    src: mongodb-index-advisor.sh.j2
+    dest: /opt/mongodb-performance/scripts/mongodb-index-advisor.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-performance
+
+- name: Performance | Create index analyzer script
+  ansible.builtin.template:
+    src: mongodb-index-analyzer.js.j2
+    dest: /opt/mongodb-performance/scripts/mongodb-index-analyzer.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-performance
+
+- name: Performance | Configure index analysis cron
+  ansible.builtin.cron:
+    name: "MongoDB Index Analysis"
+    minute: "0"
+    hour: "6"
+    day: "*"
+    month: "*"
+    weekday: "1"
+    job: "/opt/mongodb-performance/scripts/mongodb-index-advisor.sh >> /opt/mongodb-performance/logs/index-advisor.log 2>&1"
+    user: root
+    state: "{{ 'present' if mongodb_performance_index_advisor_enabled | default(true) else 'absent' }}"
+  tags:
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# Query Analyzer
+# -----------------------------------------------------------------------------
+
+- name: Performance | Create query analyzer script
+  ansible.builtin.template:
+    src: mongodb-query-analyzer.sh.j2
+    dest: /opt/mongodb-performance/scripts/mongodb-query-analyzer.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-performance
+
+- name: Performance | Create slow query report script
+  ansible.builtin.template:
+    src: mongodb-slow-query-report.js.j2
+    dest: /opt/mongodb-performance/scripts/mongodb-slow-query-report.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-performance
+
+- name: Performance | Configure query analysis cron
+  ansible.builtin.cron:
+    name: "MongoDB Query Analysis"
+    minute: "30"
+    hour: "*/4"
+    day: "*"
+    month: "*"
+    weekday: "*"
+    job: "/opt/mongodb-performance/scripts/mongodb-query-analyzer.sh >> /opt/mongodb-performance/logs/query-analyzer.log 2>&1"
+    user: root
+    state: "{{ 'present' if mongodb_performance_query_analyzer_enabled | default(true) else 'absent' }}"
+  tags:
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# Connection Pool Optimization
+# -----------------------------------------------------------------------------
+
+- name: Performance | Configure connection pool settings
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval '
+      db.adminCommand({
+        setParameter: 1,
+        maxIncomingConnections: {{ mongodb_performance_max_connections | default(65536) }}
+      })
+    '
+    --quiet
+  changed_when: false
+  tags:
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# Read/Write Concern Optimization
+# -----------------------------------------------------------------------------
+
+- name: Performance | Configure optimized read preference
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval '
+      // Set default read concern
+      db.adminCommand({
+        setDefaultRWConcern: 1,
+        defaultReadConcern: { level: "{{ mongodb_performance_read_concern | default('local') }}" }
+      })
+    '
+    --quiet
+  when: mongodb_performance_configure_rwconcern | default(false)
+  run_once: true
+  delegate_to: "{{ groups[mongodb_replicaset_group | default('mongodb')][0] }}"
+  changed_when: false
+  tags:
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# WiredTiger Tuning
+# -----------------------------------------------------------------------------
+
+- name: Performance | Create WiredTiger statistics collector
+  ansible.builtin.template:
+    src: mongodb-wiredtiger-stats.sh.j2
+    dest: /opt/mongodb-performance/scripts/mongodb-wiredtiger-stats.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-performance
+
+- name: Performance | Configure WiredTiger checkpoint interval
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval '
+      db.adminCommand({
+        setParameter: 1,
+        wiredTigerEngineRuntimeConfig: "checkpoint=(wait={{ mongodb_wiredtiger_checkpoint_interval | default(60) }})"
+      })
+    '
+    --quiet
+  when: mongodb_performance_tune_wiredtiger | default(false)
+  changed_when: false
+  tags:
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# Profiler Configuration
+# -----------------------------------------------------------------------------
+
+- name: Performance | Configure database profiler
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval '
+      // Enable profiler on all databases
+      db.adminCommand({ listDatabases: 1 }).databases.forEach(function(d) {
+        if (d.name !== "local" && d.name !== "config") {
+          var targetDb = db.getSiblingDB(d.name);
+          targetDb.setProfilingLevel({{ mongodb_profiling_level | default(1) }}, {
+            slowms: {{ mongodb_profiling_slow_op_threshold_ms | default(100) }},
+            sampleRate: {{ mongodb_profiling_sample_rate | default(1.0) }}
+          });
+        }
+      });
+      print("Profiler configured");
+    '
+    --quiet
+  when: mongodb_performance_enable_profiler | default(true)
+  changed_when: false
+  tags:
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# Collection Statistics
+# -----------------------------------------------------------------------------
+
+- name: Performance | Create collection statistics script
+  ansible.builtin.template:
+    src: mongodb-collection-stats.sh.j2
+    dest: /opt/mongodb-performance/scripts/mongodb-collection-stats.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# Memory Usage Analysis
+# -----------------------------------------------------------------------------
+
+- name: Performance | Create memory analyzer script
+  ansible.builtin.template:
+    src: mongodb-memory-analyzer.sh.j2
+    dest: /opt/mongodb-performance/scripts/mongodb-memory-analyzer.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# Performance Benchmark
+# -----------------------------------------------------------------------------
+
+- name: Performance | Create benchmark script
+  ansible.builtin.template:
+    src: mongodb-benchmark.sh.j2
+    dest: /opt/mongodb-performance/scripts/mongodb-benchmark.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# Performance Report Generator
+# -----------------------------------------------------------------------------
+
+- name: Performance | Create performance report generator
+  ansible.builtin.template:
+    src: mongodb-performance-report.sh.j2
+    dest: /opt/mongodb-performance/scripts/mongodb-performance-report.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-performance
+
+- name: Performance | Configure weekly performance report
+  ansible.builtin.cron:
+    name: "MongoDB Performance Report"
+    minute: "0"
+    hour: "7"
+    day: "*"
+    month: "*"
+    weekday: "1"
+    job: "/opt/mongodb-performance/scripts/mongodb-performance-report.sh >> /opt/mongodb-performance/logs/performance-report.log 2>&1"
+    user: root
+    state: "{{ 'present' if mongodb_performance_reports_enabled | default(true) else 'absent' }}"
+  tags:
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# Operation Counters
+# -----------------------------------------------------------------------------
+
+- name: Performance | Create operation counters collector
+  ansible.builtin.template:
+    src: mongodb-opcounters.sh.j2
+    dest: /opt/mongodb-performance/scripts/mongodb-opcounters.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-performance
+
+# -----------------------------------------------------------------------------
+# Performance Summary
+# -----------------------------------------------------------------------------
+
+- name: Performance | Get current performance stats
+  ansible.builtin.command: >
+    mongosh --host localhost --port {{ mongodb_port }}
+    {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }}
+    --eval '
+      var status = db.serverStatus();
+      var stats = {
+        connections: status.connections.current + "/" + status.connections.available,
+        opcounters: status.opcounters,
+        wiredTiger: {
+          cacheUsed: Math.round(status.wiredTiger.cache["bytes currently in the cache"] / 1024 / 1024) + "MB",
+          cacheMax: Math.round(status.wiredTiger.cache["maximum bytes configured"] / 1024 / 1024) + "MB"
+        }
+      };
+      print(JSON.stringify(stats, null, 2));
+    '
+    --quiet
+  register: _perf_stats
+  changed_when: false
+  tags:
+    - mongodb-performance
+
+- name: Performance | Display performance statistics
+  ansible.builtin.debug:
+    msg: |
+      Current Performance Statistics:
+      {{ _perf_stats.stdout }}
+  tags:
+    - mongodb-performance

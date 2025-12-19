@@ -1,0 +1,353 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Compliance & Audit Tasks
+# =============================================================================
+# Configures compliance features including audit logging, GDPR helpers,
+# data masking, and field-level encryption.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Compliance Directory Structure
+# -----------------------------------------------------------------------------
+
+- name: Compliance | Create compliance directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0750"
+  loop:
+    - /opt/mongodb-compliance
+    - /opt/mongodb-compliance/audit
+    - /opt/mongodb-compliance/scripts
+    - /opt/mongodb-compliance/reports
+    - /opt/mongodb-compliance/policies
+    - /var/log/mongodb/audit
+  tags:
+    - mongodb-compliance
+
+# -----------------------------------------------------------------------------
+# Audit Logging Configuration
+# -----------------------------------------------------------------------------
+
+- name: Compliance | Configure audit log rotation
+  ansible.builtin.template:
+    src: mongodb-audit-logrotate.j2
+    dest: /etc/logrotate.d/mongodb-audit
+    owner: root
+    group: root
+    mode: "0644"
+  when: mongodb_audit_enabled | default(false)
+  tags:
+    - mongodb-compliance
+
+- name: Compliance | Create audit log analyzer script
+  ansible.builtin.template:
+    src: mongodb-audit-analyzer.sh.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-audit-analyzer.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-compliance
+
+- name: Compliance | Create audit filter configuration
+  ansible.builtin.template:
+    src: mongodb-audit-filter.json.j2
+    dest: /opt/mongodb-compliance/policies/audit-filter.json
+    owner: root
+    group: root
+    mode: "0644"
+  when: mongodb_audit_enabled | default(false)
+  tags:
+    - mongodb-compliance
+
+# -----------------------------------------------------------------------------
+# GDPR Compliance Helpers
+# -----------------------------------------------------------------------------
+
+- name: Compliance | Create GDPR data discovery script
+  ansible.builtin.template:
+    src: mongodb-gdpr-discovery.js.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-gdpr-discovery.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-compliance
+    - mongodb-gdpr
+
+- name: Compliance | Create GDPR data export script
+  ansible.builtin.template:
+    src: mongodb-gdpr-export.sh.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-gdpr-export.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-compliance
+    - mongodb-gdpr
+
+- name: Compliance | Create GDPR data deletion script
+  ansible.builtin.template:
+    src: mongodb-gdpr-delete.sh.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-gdpr-delete.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-compliance
+    - mongodb-gdpr
+
+- name: Compliance | Create GDPR anonymization script
+  ansible.builtin.template:
+    src: mongodb-gdpr-anonymize.js.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-gdpr-anonymize.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-compliance
+    - mongodb-gdpr
+
+- name: Compliance | Create GDPR compliance report generator
+  ansible.builtin.template:
+    src: mongodb-gdpr-report.sh.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-gdpr-report.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-compliance
+    - mongodb-gdpr
+
+# -----------------------------------------------------------------------------
+# Data Masking
+# -----------------------------------------------------------------------------
+
+- name: Compliance | Create data masking configuration
+  ansible.builtin.template:
+    src: mongodb-masking-rules.json.j2
+    dest: /opt/mongodb-compliance/policies/masking-rules.json
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-compliance
+    - mongodb-masking
+
+- name: Compliance | Create data masking script
+  ansible.builtin.template:
+    src: mongodb-data-masking.js.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-data-masking.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-compliance
+    - mongodb-masking
+
+- name: Compliance | Create masked view generator
+  ansible.builtin.template:
+    src: mongodb-masked-views.js.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-masked-views.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-compliance
+    - mongodb-masking
+
+# -----------------------------------------------------------------------------
+# Field-Level Encryption (FLE)
+# -----------------------------------------------------------------------------
+
+- name: Compliance | Create FLE key management directory
+  ansible.builtin.file:
+    path: /opt/mongodb-compliance/fle-keys
+    state: directory
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: "0700"
+  when: mongodb_fle_enabled | default(false)
+  tags:
+    - mongodb-compliance
+    - mongodb-fle
+
+- name: Compliance | Create FLE setup script
+  ansible.builtin.template:
+    src: mongodb-fle-setup.js.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-fle-setup.js
+    owner: root
+    group: root
+    mode: "0644"
+  when: mongodb_fle_enabled | default(false)
+  tags:
+    - mongodb-compliance
+    - mongodb-fle
+
+- name: Compliance | Create FLE key rotation script
+  ansible.builtin.template:
+    src: mongodb-fle-key-rotation.sh.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-fle-key-rotation.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: mongodb_fle_enabled | default(false)
+  tags:
+    - mongodb-compliance
+    - mongodb-fle
+
+- name: Compliance | Create FLE schema validation script
+  ansible.builtin.template:
+    src: mongodb-fle-schema.js.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-fle-schema.js
+    owner: root
+    group: root
+    mode: "0644"
+  when: mongodb_fle_enabled | default(false)
+  tags:
+    - mongodb-compliance
+    - mongodb-fle
+
+# -----------------------------------------------------------------------------
+# Access Control Audit
+# -----------------------------------------------------------------------------
+
+- name: Compliance | Create access audit script
+  ansible.builtin.template:
+    src: mongodb-access-audit.sh.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-access-audit.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-compliance
+
+- name: Compliance | Create user activity report script
+  ansible.builtin.template:
+    src: mongodb-user-activity.js.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-user-activity.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-compliance
+
+# -----------------------------------------------------------------------------
+# Compliance Reporting
+# -----------------------------------------------------------------------------
+
+- name: Compliance | Create compliance report generator
+  ansible.builtin.template:
+    src: mongodb-compliance-report.sh.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-compliance-report.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-compliance
+
+- name: Compliance | Configure weekly compliance report
+  ansible.builtin.cron:
+    name: "MongoDB Compliance Report"
+    minute: "0"
+    hour: "8"
+    day: "*"
+    month: "*"
+    weekday: "1"
+    job: "/opt/mongodb-compliance/scripts/mongodb-compliance-report.sh >> /opt/mongodb-compliance/reports/compliance.log 2>&1"
+    user: root
+    state: "{{ 'present' if mongodb_compliance_reports_enabled | default(true) else 'absent' }}"
+  tags:
+    - mongodb-compliance
+
+# -----------------------------------------------------------------------------
+# Security Configuration Validation
+# -----------------------------------------------------------------------------
+
+- name: Compliance | Create security configuration checker
+  ansible.builtin.template:
+    src: mongodb-security-check.sh.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-security-check.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-compliance
+
+- name: Compliance | Run security configuration check
+  ansible.builtin.command: /opt/mongodb-compliance/scripts/mongodb-security-check.sh
+  register: _security_check
+  changed_when: false
+  failed_when: false
+  tags:
+    - mongodb-compliance
+
+- name: Compliance | Display security check results
+  ansible.builtin.debug:
+    msg: "{{ _security_check.stdout_lines }}"
+  when: mongodb_debug_mode | default(false)
+  tags:
+    - mongodb-compliance
+
+# -----------------------------------------------------------------------------
+# Data Classification
+# -----------------------------------------------------------------------------
+
+- name: Compliance | Create data classification script
+  ansible.builtin.template:
+    src: mongodb-data-classification.js.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-data-classification.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-compliance
+
+# -----------------------------------------------------------------------------
+# Retention Policy Enforcement
+# -----------------------------------------------------------------------------
+
+- name: Compliance | Create retention policy script
+  ansible.builtin.template:
+    src: mongodb-retention-policy.js.j2
+    dest: /opt/mongodb-compliance/scripts/mongodb-retention-policy.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-compliance
+
+- name: Compliance | Configure retention policy cron
+  ansible.builtin.cron:
+    name: "MongoDB Retention Policy Enforcement"
+    minute: "0"
+    hour: "3"
+    day: "*"
+    month: "*"
+    weekday: "*"
+    job: "mongosh {{ _mongodb_auth_options if mongodb_security_auth_enabled else '' }} /opt/mongodb-compliance/scripts/mongodb-retention-policy.js >> /opt/mongodb-compliance/reports/retention.log 2>&1"
+    user: root
+    state: "{{ 'present' if mongodb_retention_policy_enabled | default(false) else 'absent' }}"
+  tags:
+    - mongodb-compliance
+
+# -----------------------------------------------------------------------------
+# Compliance Summary
+# -----------------------------------------------------------------------------
+
+- name: Compliance | Display compliance configuration
+  ansible.builtin.debug:
+    msg: |
+      Compliance Configuration Summary:
+      - Audit Logging: {{ mongodb_audit_enabled | default(false) }}
+      - GDPR Helpers: Installed
+      - Data Masking: Configured
+      - Field-Level Encryption: {{ mongodb_fle_enabled | default(false) }}
+      - Compliance Reports: {{ mongodb_compliance_reports_enabled | default(true) }}
+      - Retention Policy: {{ mongodb_retention_policy_enabled | default(false) }}
+      - Scripts Location: /opt/mongodb-compliance/scripts/
+  tags:
+    - mongodb-compliance

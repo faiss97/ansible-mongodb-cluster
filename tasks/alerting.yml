@@ -1,0 +1,253 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Alerting & Notifications Tasks
+# =============================================================================
+# Configures alerting for MongoDB cluster events via Slack, Teams, PagerDuty,
+# email, and webhooks.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Alerting Scripts Directory
+# -----------------------------------------------------------------------------
+
+- name: Alerting | Create alerting directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - /opt/mongodb-alerting
+    - /opt/mongodb-alerting/scripts
+    - /opt/mongodb-alerting/logs
+    - /opt/mongodb-alerting/state
+  tags:
+    - mongodb-alerting
+
+# -----------------------------------------------------------------------------
+# Alert Configuration File
+# -----------------------------------------------------------------------------
+
+- name: Alerting | Create alerting configuration
+  ansible.builtin.template:
+    src: mongodb-alerting.conf.j2
+    dest: /opt/mongodb-alerting/alerting.conf
+    owner: root
+    group: root
+    mode: "0600"
+  tags:
+    - mongodb-alerting
+
+# -----------------------------------------------------------------------------
+# Main Alert Script
+# -----------------------------------------------------------------------------
+
+- name: Alerting | Create main alerting script
+  ansible.builtin.template:
+    src: mongodb-alert.sh.j2
+    dest: /opt/mongodb-alerting/scripts/mongodb-alert.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-alerting
+
+# -----------------------------------------------------------------------------
+# Notification Provider Scripts
+# -----------------------------------------------------------------------------
+
+- name: Alerting | Create Slack notification script
+  ansible.builtin.template:
+    src: notify-slack.sh.j2
+    dest: /opt/mongodb-alerting/scripts/notify-slack.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: mongodb_alerting_slack_enabled | default(false)
+  tags:
+    - mongodb-alerting
+
+- name: Alerting | Create Teams notification script
+  ansible.builtin.template:
+    src: notify-teams.sh.j2
+    dest: /opt/mongodb-alerting/scripts/notify-teams.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: mongodb_alerting_teams_enabled | default(false)
+  tags:
+    - mongodb-alerting
+
+- name: Alerting | Create PagerDuty notification script
+  ansible.builtin.template:
+    src: notify-pagerduty.sh.j2
+    dest: /opt/mongodb-alerting/scripts/notify-pagerduty.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: mongodb_alerting_pagerduty_enabled | default(false)
+  tags:
+    - mongodb-alerting
+
+- name: Alerting | Create email notification script
+  ansible.builtin.template:
+    src: notify-email.sh.j2
+    dest: /opt/mongodb-alerting/scripts/notify-email.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: mongodb_alerting_email_enabled | default(false)
+  tags:
+    - mongodb-alerting
+
+- name: Alerting | Create webhook notification script
+  ansible.builtin.template:
+    src: notify-webhook.sh.j2
+    dest: /opt/mongodb-alerting/scripts/notify-webhook.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: mongodb_alerting_webhook_enabled | default(false)
+  tags:
+    - mongodb-alerting
+
+# -----------------------------------------------------------------------------
+# Health Check Monitor Script
+# -----------------------------------------------------------------------------
+
+- name: Alerting | Create health monitor script
+  ansible.builtin.template:
+    src: mongodb-health-monitor.sh.j2
+    dest: /opt/mongodb-alerting/scripts/mongodb-health-monitor.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-alerting
+
+# -----------------------------------------------------------------------------
+# Replication Lag Monitor
+# -----------------------------------------------------------------------------
+
+- name: Alerting | Create replication lag monitor script
+  ansible.builtin.template:
+    src: mongodb-repl-lag-monitor.sh.j2
+    dest: /opt/mongodb-alerting/scripts/mongodb-repl-lag-monitor.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: mongodb_deployment_mode == 'replicaset'
+  tags:
+    - mongodb-alerting
+
+# -----------------------------------------------------------------------------
+# Disk Space Monitor
+# -----------------------------------------------------------------------------
+
+- name: Alerting | Create disk space monitor script
+  ansible.builtin.template:
+    src: mongodb-disk-monitor.sh.j2
+    dest: /opt/mongodb-alerting/scripts/mongodb-disk-monitor.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-alerting
+
+# -----------------------------------------------------------------------------
+# Failover Monitor
+# -----------------------------------------------------------------------------
+
+- name: Alerting | Create failover monitor script
+  ansible.builtin.template:
+    src: mongodb-failover-monitor.sh.j2
+    dest: /opt/mongodb-alerting/scripts/mongodb-failover-monitor.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: mongodb_deployment_mode == 'replicaset'
+  tags:
+    - mongodb-alerting
+
+# -----------------------------------------------------------------------------
+# Connection Monitor
+# -----------------------------------------------------------------------------
+
+- name: Alerting | Create connection monitor script
+  ansible.builtin.template:
+    src: mongodb-connection-monitor.sh.j2
+    dest: /opt/mongodb-alerting/scripts/mongodb-connection-monitor.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-alerting
+
+# -----------------------------------------------------------------------------
+# Systemd Service for Monitoring
+# -----------------------------------------------------------------------------
+
+- name: Alerting | Create monitoring service
+  ansible.builtin.template:
+    src: mongodb-monitor.service.j2
+    dest: /etc/systemd/system/mongodb-monitor.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+  tags:
+    - mongodb-alerting
+
+- name: Alerting | Create monitoring timer
+  ansible.builtin.template:
+    src: mongodb-monitor.timer.j2
+    dest: /etc/systemd/system/mongodb-monitor.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+  tags:
+    - mongodb-alerting
+
+- name: Alerting | Enable monitoring timer
+  ansible.builtin.systemd:
+    name: mongodb-monitor.timer
+    enabled: "{{ mongodb_alerting_enabled | default(false) }}"
+    state: "{{ 'started' if mongodb_alerting_enabled | default(false) else 'stopped' }}"
+    daemon_reload: true
+  tags:
+    - mongodb-alerting
+
+# -----------------------------------------------------------------------------
+# Test Alerting
+# -----------------------------------------------------------------------------
+
+- name: Alerting | Test alert delivery
+  ansible.builtin.command: >
+    /opt/mongodb-alerting/scripts/mongodb-alert.sh test "MongoDB alerting configured on {{ inventory_hostname }}"
+  when: mongodb_alerting_test | default(false)
+  changed_when: false
+  tags:
+    - mongodb-alerting
+    - mongodb-alerting-test
+
+# -----------------------------------------------------------------------------
+# Alerting Summary
+# -----------------------------------------------------------------------------
+
+- name: Alerting | Display alerting configuration
+  ansible.builtin.debug:
+    msg: |
+      Alerting Configuration Summary:
+      - Enabled: {{ mongodb_alerting_enabled | default(false) }}
+      - Slack: {{ mongodb_alerting_slack_enabled | default(false) }}
+      - Teams: {{ mongodb_alerting_teams_enabled | default(false) }}
+      - PagerDuty: {{ mongodb_alerting_pagerduty_enabled | default(false) }}
+      - Email: {{ mongodb_alerting_email_enabled | default(false) }}
+      - Webhook: {{ mongodb_alerting_webhook_enabled | default(false) }}
+      - Monitor Interval: {{ mongodb_alerting_interval | default(60) }} seconds
+  tags:
+    - mongodb-alerting

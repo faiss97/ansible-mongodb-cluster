@@ -1,0 +1,17 @@
+#!/bin/bash
+# =============================================================================
+# MongoDB Oplog Cleanup Script
+# =============================================================================
+
+set -euo pipefail
+
+PITR_DIR="{{ mongodb_pitr_directory }}"
+OPLOG_DIR="${PITR_DIR}/oplog"
+RETENTION_DAYS="{{ mongodb_pitr_retention_days | default(7) }}"
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting oplog cleanup..."
+
+# Remove oplog files older than retention period
+find "${OPLOG_DIR}" -name "oplog_*.bson" -mtime +${RETENTION_DAYS} -delete
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Oplog cleanup complete"

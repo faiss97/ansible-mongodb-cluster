@@ -1,0 +1,149 @@
+# =============================================================================
+# MkDocs Configuration
+# =============================================================================
+# Documentation site for ansible-mongodb-cluster
+# Author: faiss97
+# =============================================================================
+
+site_name: Ansible MongoDB Cluster
+site_description: Production-ready Ansible role for MongoDB cluster deployment
+site_author: faiss97
+site_url: https://faiss97.github.io/ansible-mongodb-cluster/
+
+repo_name: faiss97/ansible-mongodb-cluster
+repo_url: https://github.com/faiss97/ansible-mongodb-cluster
+edit_uri: edit/main/docs/
+
+copyright: Copyright &copy; 2024 faiss97
+
+theme:
+  name: material
+  language: en
+  palette:
+    - scheme: default
+      primary: green
+      accent: light green
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: green
+      accent: light green
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+plugins:
+  - search
+  - mermaid2
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      repo_url_shorthand: true
+      user: faiss97
+      repo: ansible-mongodb-cluster
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Requirements: getting-started/requirements.md
+  - Deployment Modes:
+    - Overview: deployment/overview.md
+    - Standalone: deployment/standalone.md
+    - Replica Set: deployment/replicaset.md
+    - Sharded Cluster: deployment/sharded.md
+  - Configuration:
+    - Variables Reference: configuration/variables.md
+    - Security: configuration/security.md
+    - Storage: configuration/storage.md
+    - Network: configuration/network.md
+  - Advanced Features:
+    - Rolling Upgrades: advanced/rolling-upgrade.md
+    - PITR: advanced/pitr.md
+    - Alerting: advanced/alerting.md
+    - Disaster Recovery: advanced/disaster-recovery.md
+    - Performance Tuning: advanced/performance.md
+    - Compliance: advanced/compliance.md
+    - Chaos Testing: advanced/chaos-testing.md
+  - Operations:
+    - Backup & Restore: operations/backup.md
+    - Monitoring: operations/monitoring.md
+    - Troubleshooting: operations/troubleshooting.md
+    - Runbooks: operations/runbooks.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - Diagrams: architecture/diagrams.md
+  - Contributing:
+    - Guidelines: contributing/guidelines.md
+    - Development: contributing/development.md
+    - Testing: contributing/testing.md
+  - Changelog: changelog.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/faiss97
+    - icon: fontawesome/brands/linkedin
+      link: https://linkedin.com/in/faiss97
+  version:
+    provider: mike
+  analytics:
+    provider: google
+    property: G-XXXXXXXXXX
+
+extra_css:
+  - stylesheets/extra.css

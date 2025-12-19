@@ -1,0 +1,47 @@
+#!/bin/bash
+# =============================================================================
+# MongoDB Snapshot Script for PITR
+# =============================================================================
+
+set -euo pipefail
+
+PITR_DIR="{{ mongodb_pitr_directory }}"
+SNAPSHOT_DIR="${PITR_DIR}/snapshots"
+LOG_FILE="${PITR_DIR}/logs/snapshot.log"
+MONGO_PORT="{{ mongodb_port }}"
+
+{% if mongodb_security_auth_enabled %}
+AUTH_OPTS="--username {{ mongodb_backup_user }} --password {{ mongodb_backup_password }} --authenticationDatabase admin"
+{% else %}
+AUTH_OPTS=""
+{% endif %}
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "${LOG_FILE}"
+}
+
+SNAPSHOT_FILE="${SNAPSHOT_DIR}/snapshot_$(date +%Y%m%d_%H%M%S).tar.gz"
+
+log "Starting PITR snapshot..."
+
+# Create snapshot using mongodump
+DUMP_DIR=$(mktemp -d)
+
+mongodump \
+    --host localhost --port ${MONGO_PORT} \
+    ${AUTH_OPTS} \
+    --oplog \
+    --gzip \
+    --out "${DUMP_DIR}" \
+    2>> "${LOG_FILE}"
+
+# Create tarball
+tar -czf "${SNAPSHOT_FILE}" -C "${DUMP_DIR}" .
+rm -rf "${DUMP_DIR}"
+
+log "Snapshot created: ${SNAPSHOT_FILE}"
+
+# Cleanup old snapshots
+find "${SNAPSHOT_DIR}" -name "snapshot_*.tar.gz" -mtime +{{ mongodb_pitr_retention_days | default(7) }} -delete
+
+log "Snapshot complete"

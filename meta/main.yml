@@ -2,14 +2,19 @@
 # =============================================================================
 # Ansible MongoDB Cluster - Role Metadata
 # =============================================================================
+# Author: faiss97
+# Repository: https://github.com/faiss97/ansible-mongodb-cluster
+# =============================================================================
 
 galaxy_info:
   role_name: ansible_mongodb_cluster
-  author: DevOps Faiss97
+  namespace: faiss97
+  author: faiss97
   description: |
     Production-ready Ansible role for deploying and managing MongoDB clusters.
     Supports standalone, replica set, and sharded cluster deployments with
-    full security, backup, monitoring, and high availability configurations.
+    comprehensive security, backup, monitoring, PITR, disaster recovery,
+    alerting, compliance, and chaos testing features.
 
   company: ""
 
@@ -20,13 +25,13 @@ galaxy_info:
   platforms:
     - name: Debian
       versions:
-        - bullseye
-        - bookworm
+        - bullseye   # 11
+        - bookworm   # 12
     - name: Ubuntu
       versions:
-        - focal
-        - jammy
-        - noble
+        - focal      # 20.04
+        - jammy      # 22.04
+        - noble      # 24.04
     - name: EL
       versions:
         - "8"
@@ -52,17 +57,32 @@ galaxy_info:
     - security
     - high_availability
     - production
+    - prometheus
+    - grafana
+    - tls
+    - ssl
+    - pitr
+    - disaster_recovery
+    - compliance
+    - gdpr
+    - audit
+    - chaos_engineering
+    - alerting
+    - pagerduty
+    - slack
 
-  issue_tracker_url: ""
-  documentation_url: ""
+  issue_tracker_url: "https://github.com/faiss97/ansible-mongodb-cluster/issues"
+  documentation_url: "https://faiss97.github.io/ansible-mongodb-cluster/"
+  repository: "https://github.com/faiss97/ansible-mongodb-cluster"
 
-# Dependencies
-dependencies:
-  - role: ansible.posix
-    when: false  # Collection dependency, not role
+# Dependencies - None required, all functionality is self-contained
+dependencies: []
 
-# Collections required
+# Collections required (installed via requirements.yml)
 collections:
-  - community.mongodb
-  - ansible.posix
-  - community.general
+  - name: community.mongodb
+    version: ">=1.5.0"
+  - name: ansible.posix
+    version: ">=1.4.0"
+  - name: community.general
+    version: ">=6.0.0"

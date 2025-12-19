@@ -39,7 +39,7 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ```bash
 # Clone your fork
-git clone https://github.com/faiss97/ansible-mongodb-cluster.git
+git clone https://github.com/YOUR_USERNAME/ansible-mongodb-cluster.git
 cd ansible-mongodb-cluster
 
 # Create virtual environment

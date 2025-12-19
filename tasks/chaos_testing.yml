@@ -1,0 +1,326 @@
+---
+# =============================================================================
+# Ansible MongoDB Cluster - Chaos Engineering & Testing Tasks
+# =============================================================================
+# Implements chaos engineering tests including primary kill, network partition
+# simulation, performance benchmarks, and failover testing.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Chaos Testing Directory
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Create chaos testing directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - /opt/mongodb-chaos
+    - /opt/mongodb-chaos/scripts
+    - /opt/mongodb-chaos/results
+    - /opt/mongodb-chaos/logs
+  tags:
+    - mongodb-chaos
+
+# -----------------------------------------------------------------------------
+# Primary Kill Test
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Create primary kill test script
+  ansible.builtin.template:
+    src: chaos-kill-primary.sh.j2
+    dest: /opt/mongodb-chaos/scripts/chaos-kill-primary.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-chaos
+
+# -----------------------------------------------------------------------------
+# Network Partition Simulation
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Create network partition script
+  ansible.builtin.template:
+    src: chaos-network-partition.sh.j2
+    dest: /opt/mongodb-chaos/scripts/chaos-network-partition.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-chaos
+
+- name: Chaos | Create network latency injection script
+  ansible.builtin.template:
+    src: chaos-network-latency.sh.j2
+    dest: /opt/mongodb-chaos/scripts/chaos-network-latency.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-chaos
+
+# -----------------------------------------------------------------------------
+# Resource Exhaustion Tests
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Create CPU stress test script
+  ansible.builtin.template:
+    src: chaos-cpu-stress.sh.j2
+    dest: /opt/mongodb-chaos/scripts/chaos-cpu-stress.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-chaos
+
+- name: Chaos | Create memory pressure test script
+  ansible.builtin.template:
+    src: chaos-memory-pressure.sh.j2
+    dest: /opt/mongodb-chaos/scripts/chaos-memory-pressure.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-chaos
+
+- name: Chaos | Create disk I/O stress script
+  ansible.builtin.template:
+    src: chaos-disk-stress.sh.j2
+    dest: /opt/mongodb-chaos/scripts/chaos-disk-stress.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-chaos
+
+# -----------------------------------------------------------------------------
+# Failover Testing
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Create automated failover test script
+  ansible.builtin.template:
+    src: chaos-failover-test.sh.j2
+    dest: /opt/mongodb-chaos/scripts/chaos-failover-test.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-chaos
+
+- name: Chaos | Create election timing test script
+  ansible.builtin.template:
+    src: chaos-election-timing.sh.j2
+    dest: /opt/mongodb-chaos/scripts/chaos-election-timing.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-chaos
+
+# -----------------------------------------------------------------------------
+# Performance Benchmarks
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Create write benchmark script
+  ansible.builtin.template:
+    src: benchmark-write.js.j2
+    dest: /opt/mongodb-chaos/scripts/benchmark-write.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-chaos
+    - mongodb-benchmark
+
+- name: Chaos | Create read benchmark script
+  ansible.builtin.template:
+    src: benchmark-read.js.j2
+    dest: /opt/mongodb-chaos/scripts/benchmark-read.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-chaos
+    - mongodb-benchmark
+
+- name: Chaos | Create mixed workload benchmark script
+  ansible.builtin.template:
+    src: benchmark-mixed.js.j2
+    dest: /opt/mongodb-chaos/scripts/benchmark-mixed.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-chaos
+    - mongodb-benchmark
+
+- name: Chaos | Create benchmark runner script
+  ansible.builtin.template:
+    src: benchmark-runner.sh.j2
+    dest: /opt/mongodb-chaos/scripts/benchmark-runner.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-chaos
+    - mongodb-benchmark
+
+# -----------------------------------------------------------------------------
+# Connection Stress Test
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Create connection stress test script
+  ansible.builtin.template:
+    src: chaos-connection-stress.sh.j2
+    dest: /opt/mongodb-chaos/scripts/chaos-connection-stress.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-chaos
+
+# -----------------------------------------------------------------------------
+# Data Integrity Test
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Create data integrity test script
+  ansible.builtin.template:
+    src: chaos-data-integrity.js.j2
+    dest: /opt/mongodb-chaos/scripts/chaos-data-integrity.js
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - mongodb-chaos
+
+# -----------------------------------------------------------------------------
+# Rolling Chaos Test Suite
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Create full chaos test suite script
+  ansible.builtin.template:
+    src: chaos-full-suite.sh.j2
+    dest: /opt/mongodb-chaos/scripts/chaos-full-suite.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-chaos
+
+# -----------------------------------------------------------------------------
+# Chaos Test Results Analyzer
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Create test results analyzer
+  ansible.builtin.template:
+    src: chaos-analyze-results.sh.j2
+    dest: /opt/mongodb-chaos/scripts/chaos-analyze-results.sh
+    owner: root
+    group: root
+    mode: "0750"
+  tags:
+    - mongodb-chaos
+
+# -----------------------------------------------------------------------------
+# Install Stress Testing Tools
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Install stress testing tools
+  ansible.builtin.package:
+    name:
+      - stress-ng
+      - iperf3
+      - iproute2
+      - tc
+    state: present
+  when: mongodb_chaos_install_tools | default(true)
+  failed_when: false
+  tags:
+    - mongodb-chaos
+
+# -----------------------------------------------------------------------------
+# Run Chaos Tests (Manual Trigger)
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Run primary kill test
+  block:
+    - name: Chaos | Execute primary kill test
+      ansible.builtin.command: /opt/mongodb-chaos/scripts/chaos-kill-primary.sh
+      register: _chaos_kill_result
+      changed_when: false
+
+    - name: Chaos | Display kill test results
+      ansible.builtin.debug:
+        msg: "{{ _chaos_kill_result.stdout_lines }}"
+
+  when: mongodb_chaos_run_kill_test | default(false)
+  run_once: true
+  delegate_to: "{{ groups[mongodb_replicaset_group | default('mongodb')][0] }}"
+  tags:
+    - mongodb-chaos
+    - mongodb-chaos-kill
+
+- name: Chaos | Run failover timing test
+  block:
+    - name: Chaos | Execute failover timing test
+      ansible.builtin.command: /opt/mongodb-chaos/scripts/chaos-election-timing.sh
+      register: _chaos_failover_result
+      changed_when: false
+
+    - name: Chaos | Display failover test results
+      ansible.builtin.debug:
+        msg: "{{ _chaos_failover_result.stdout_lines }}"
+
+  when: mongodb_chaos_run_failover_test | default(false)
+  run_once: true
+  delegate_to: "{{ groups[mongodb_replicaset_group | default('mongodb')][0] }}"
+  tags:
+    - mongodb-chaos
+    - mongodb-chaos-failover
+
+- name: Chaos | Run performance benchmark
+  block:
+    - name: Chaos | Execute performance benchmark
+      ansible.builtin.command: /opt/mongodb-chaos/scripts/benchmark-runner.sh
+      register: _chaos_benchmark_result
+      changed_when: false
+
+    - name: Chaos | Display benchmark results
+      ansible.builtin.debug:
+        msg: "{{ _chaos_benchmark_result.stdout_lines }}"
+
+  when: mongodb_chaos_run_benchmark | default(false)
+  run_once: true
+  delegate_to: "{{ groups[mongodb_replicaset_group | default('mongodb')][0] }}"
+  tags:
+    - mongodb-chaos
+    - mongodb-benchmark
+
+# -----------------------------------------------------------------------------
+# Chaos Testing Summary
+# -----------------------------------------------------------------------------
+
+- name: Chaos | Display chaos testing configuration
+  ansible.builtin.debug:
+    msg: |
+      Chaos Testing Configuration:
+      - Scripts Location: /opt/mongodb-chaos/scripts/
+      - Results Location: /opt/mongodb-chaos/results/
+      
+      Available Tests:
+      - chaos-kill-primary.sh       - Kill primary and measure recovery
+      - chaos-network-partition.sh  - Simulate network partition
+      - chaos-network-latency.sh    - Inject network latency
+      - chaos-failover-test.sh      - Automated failover testing
+      - chaos-election-timing.sh    - Measure election timing
+      - chaos-connection-stress.sh  - Connection stress test
+      - benchmark-runner.sh         - Run performance benchmarks
+      - chaos-full-suite.sh         - Run complete test suite
+      
+      Usage: /opt/mongodb-chaos/scripts/<script-name>
+  tags:
+    - mongodb-chaos

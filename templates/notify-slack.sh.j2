@@ -1,0 +1,60 @@
+#!/bin/bash
+# =============================================================================
+# Slack Notification Script
+# =============================================================================
+
+set -euo pipefail
+
+source /opt/mongodb-alerting/alerting.conf
+
+SEVERITY="$1"
+MESSAGE="$2"
+DETAILS="${3:-No additional details}"
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+HOSTNAME=$(hostname -f)
+
+case ${SEVERITY} in
+    critical) COLOR="#FF0000" ;;
+    warning) COLOR="#FFA500" ;;
+    info) COLOR="#00FF00" ;;
+    *) COLOR="#808080" ;;
+esac
+
+PAYLOAD=$(cat << EOF
+{
+    "attachments": [
+        {
+            "color": "${COLOR}",
+            "title": "MongoDB Alert - ${SEVERITY^^}",
+            "text": "${MESSAGE}",
+            "fields": [
+                {
+                    "title": "Host",
+                    "value": "${HOSTNAME}",
+                    "short": true
+                },
+                {
+                    "title": "Severity",
+                    "value": "${SEVERITY}",
+                    "short": true
+                },
+                {
+                    "title": "Details",
+                    "value": "${DETAILS}",
+                    "short": false
+                }
+            ],
+            "footer": "MongoDB Alerting System",
+            "ts": $(date +%s)
+        }
+    ]
+}
+EOF
+)
+
+curl -s -X POST \
+    -H "Content-Type: application/json" \
+    -d "${PAYLOAD}" \
+    "${SLACK_WEBHOOK_URL}" > /dev/null
+
+exit 0

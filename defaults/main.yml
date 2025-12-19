@@ -705,3 +705,167 @@ mongodb_debug_mode: false
 
 # Dry run mode (don't make changes)
 mongodb_dry_run: false
+
+# =============================================================================
+# ADVANCED FEATURES - Added Variables
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Rolling Upgrade Configuration
+# -----------------------------------------------------------------------------
+
+# Enable rolling upgrade support
+mongodb_rolling_upgrade_enabled: false
+
+# Maximum replication lag allowed before upgrade (seconds)
+mongodb_rolling_upgrade_max_lag: 60
+
+# Pause between node upgrades (seconds)
+mongodb_rolling_upgrade_pause: 30
+
+# Pause between rolling restarts (seconds)
+mongodb_rolling_restart_pause: 30
+
+# Trigger rolling restart
+mongodb_rolling_restart: false
+
+# -----------------------------------------------------------------------------
+# Point-in-Time Recovery (PITR) Configuration
+# -----------------------------------------------------------------------------
+
+# Enable PITR
+mongodb_pitr_enabled: false
+
+# PITR directory
+mongodb_pitr_directory: "/var/backup/mongodb-pitr"
+
+# Oplog tail interval (seconds)
+mongodb_pitr_tail_interval: 60
+
+# Snapshot interval (hours)
+mongodb_pitr_snapshot_interval_hours: 6
+
+# PITR retention days
+mongodb_pitr_retention_days: 7
+
+# -----------------------------------------------------------------------------
+# Alerting Configuration
+# -----------------------------------------------------------------------------
+
+# Enable alerting
+mongodb_alerting_enabled: false
+
+# Alert check interval (seconds)
+mongodb_alerting_interval: 60
+
+# Test alerts on deployment
+mongodb_alerting_test: false
+
+# Slack configuration
+mongodb_alerting_slack_enabled: false
+mongodb_alerting_slack_webhook: ""
+mongodb_alerting_slack_channel: "#mongodb-alerts"
+
+# Microsoft Teams configuration
+mongodb_alerting_teams_enabled: false
+mongodb_alerting_teams_webhook: ""
+
+# PagerDuty configuration
+mongodb_alerting_pagerduty_enabled: false
+mongodb_alerting_pagerduty_key: ""
+
+# Email configuration
+mongodb_alerting_email_enabled: false
+mongodb_alerting_email_recipients: []
+mongodb_alerting_smtp_server: "localhost"
+
+# Generic webhook configuration
+mongodb_alerting_webhook_enabled: false
+mongodb_alerting_webhook_url: ""
+mongodb_alerting_webhook_auth: ""
+
+# Alert thresholds
+mongodb_alerting_repl_lag_warning: 30
+mongodb_alerting_repl_lag_critical: 60
+mongodb_alerting_disk_warning: 80
+mongodb_alerting_disk_critical: 90
+mongodb_alerting_conn_warning: 80
+mongodb_alerting_conn_critical: 95
+
+# -----------------------------------------------------------------------------
+# Disaster Recovery Configuration
+# -----------------------------------------------------------------------------
+
+# Delayed secondary member hostname
+mongodb_dr_delayed_member: ""
+
+# Delay in seconds for delayed secondary
+mongodb_dr_delay_seconds: 3600
+
+# Enable recovery point tracking
+mongodb_dr_tracking_enabled: true
+
+# Configure write concern for cross-DC durability
+mongodb_dr_configure_write_concern: false
+mongodb_dr_write_concern: "majority"
+mongodb_dr_write_timeout: 10000
+
+# -----------------------------------------------------------------------------
+# Performance Tuning Configuration
+# -----------------------------------------------------------------------------
+
+# Enable automatic index advisor
+mongodb_performance_index_advisor_enabled: true
+
+# Enable query analyzer
+mongodb_performance_query_analyzer_enabled: true
+
+# Enable performance reports
+mongodb_performance_reports_enabled: true
+
+# Configure read/write concerns
+mongodb_performance_configure_rwconcern: false
+mongodb_performance_read_concern: "local"
+
+# WiredTiger tuning
+mongodb_performance_tune_wiredtiger: false
+mongodb_wiredtiger_checkpoint_interval: 60
+
+# Profiler settings
+mongodb_performance_enable_profiler: true
+mongodb_profiling_level: 1
+mongodb_profiling_sample_rate: 1.0
+
+# Maximum connections
+mongodb_performance_max_connections: 65536
+
+# -----------------------------------------------------------------------------
+# Compliance & Audit Configuration
+# -----------------------------------------------------------------------------
+
+# Enable compliance reports
+mongodb_compliance_reports_enabled: true
+
+# Field-Level Encryption (Enterprise)
+mongodb_fle_enabled: false
+
+# Data retention policy
+mongodb_retention_policy_enabled: false
+
+# Audit filter (Enterprise)
+mongodb_audit_filter_config: {}
+
+# -----------------------------------------------------------------------------
+# Chaos Testing Configuration
+# -----------------------------------------------------------------------------
+
+# Install stress testing tools
+mongodb_chaos_install_tools: true
+
+# Run tests during deployment
+mongodb_chaos_run_kill_test: false
+mongodb_chaos_run_failover_test: false
+mongodb_chaos_run_benchmark: false
+
+# Replica set group name for tests
+mongodb_replicaset_group: "mongodb"

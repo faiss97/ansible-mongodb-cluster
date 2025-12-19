@@ -1,0 +1,54 @@
+---
+# =============================================================================
+# Molecule Replica Set Converge Playbook
+# =============================================================================
+
+- name: Converge
+  hosts: mongodb
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Update package cache (Debian)
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == 'Debian'
+
+    - name: Update package cache (RedHat)
+      ansible.builtin.dnf:
+        update_cache: true
+      when: ansible_os_family == 'RedHat'
+
+    - name: Install prerequisites
+      ansible.builtin.package:
+        name:
+          - curl
+          - gnupg
+          - ca-certificates
+        state: present
+
+  roles:
+    - role: ansible-mongodb-cluster
+
+  post_tasks:
+    - name: Wait for replica set to stabilize
+      ansible.builtin.pause:
+        seconds: 30
+      run_once: true
+
+    - name: Display replica set status
+      ansible.builtin.command: >
+        mongosh --host localhost --port 27017
+        -u admin -p 'TestAdminPass123!'
+        --authenticationDatabase admin
+        --eval "rs.status().members.map(m => ({name: m.name, state: m.stateStr}))"
+        --quiet
+      register: rs_status
+      changed_when: false
+      run_once: true
+
+    - name: Show status
+      ansible.builtin.debug:
+        var: rs_status.stdout
+      run_once: true
